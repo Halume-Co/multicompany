@@ -56,6 +56,7 @@ export interface Product {
   sizes: ProductSize[];
   sellerId: string;
   sellerName: string;
+  sellerLogo?: string | null;
   category: string;
   rating: number;
   reviewCount: number;

@@ -192,6 +192,10 @@ export async function updateOrderStatus(
   });
 }
 
+export async function getCompany(id: string): Promise<ApiResponse<Company>> {
+  return fetchAPI<Company>(`/companies/${id}`);
+}
+
 export async function getMyCompany(): Promise<ApiResponse<Company>> {
   return fetchAPI<Company>("/companies/me", {
     cache: "no-store",

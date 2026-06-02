@@ -171,9 +171,27 @@ export default function ProductDetailPage() {
 
               <div className="space-y-sm">
                 <span className="text-4xl font-bold text-foreground">${product.price.toFixed(2)}</span>
-                <p className="text-sm text-muted-foreground">
-                  Sold by: <span className="font-medium text-foreground">{product.sellerName}</span>
-                </p>
+                <Link 
+                  href={`/companies/${product.sellerId}`}
+                  className="flex items-center gap-md p-md rounded-lg border border-border hover:border-primary transition group"
+                >
+                  <div className="w-12 h-12 rounded-full overflow-hidden bg-secondary flex-shrink-0 border border-border group-hover:border-primary/30 transition">
+                    {product.sellerLogo ? (
+                      <img src={product.sellerLogo} alt={product.sellerName} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-xl font-bold text-muted-foreground">
+                        {product.sellerName.charAt(0)}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground group-hover:text-primary transition">Sold by:</p>
+                    <p className="font-bold text-foreground group-hover:text-primary transition">{product.sellerName}</p>
+                  </div>
+                  <div className="ml-auto">
+                    <Button variant="ghost" size="sm">Visit Store</Button>
+                  </div>
+                </Link>
               </div>
 
               <div className="space-y-sm">

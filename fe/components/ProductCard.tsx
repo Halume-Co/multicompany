@@ -52,14 +52,25 @@ export function ProductCard({ product }: ProductCardProps) {
             </span>
           </div>
 
-          <div className="mt-auto pt-sm">
+          <div className="mt-auto pt-sm flex items-center justify-between">
             <div>
               <p className="text-xl font-bold text-foreground">
                 ${product.price.toFixed(2)}
               </p>
-              <p className="text-xs text-muted-foreground">
+              <Link 
+                href={`/companies/${product.sellerId}`}
+                className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-xs"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {product.sellerLogo ? (
+                  <img src={product.sellerLogo} alt={product.sellerName} className="w-4 h-4 rounded-full object-cover" />
+                ) : (
+                  <div className="w-4 h-4 rounded-full bg-secondary flex items-center justify-center text-[10px] font-bold">
+                    {product.sellerName.charAt(0)}
+                  </div>
+                )}
                 by {product.sellerName}
-              </p>
+              </Link>
             </div>
           </div>
         </div>

@@ -34,6 +34,7 @@ export class ProductService {
         .map((s) => ({ size: String(s.size), stock: s.stock })),
       sellerId: product.companyId,
       sellerName: product.company.name,
+      sellerLogo: product.company.logoUrl,
       category: product.category.name,
       rating: 0,
       reviewCount: 0,
