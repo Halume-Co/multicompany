@@ -113,18 +113,19 @@ export default function ProductDetailPage() {
           <div className="grid gap-3xl lg:grid-cols-[minmax(0,1fr)_560px]">
             <div className="space-y-lg">
               <div className="aspect-square overflow-hidden rounded-lg bg-secondary">
-                {product.images[selectedImageIndex] ? (
+                {product.images[selectedImageIndex] || "/placeholder.jpg" ? (
                   <img
-                    src={product.images[selectedImageIndex]}
+                    src={product.images[selectedImageIndex] || "/placeholder.jpg"}
                     alt={product.name}
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <div className="h-full w-full flex items-center justify-center text-muted-foreground text-sm">
+                  <div className="h-full w-full flex items-center justify-center text-muted-foreground">
                     No image
                   </div>
                 )}
               </div>
+
               {product.images.length > 1 && (
                 <div className="grid grid-cols-3 gap-md sm:grid-cols-4">
                   {product.images.map((image, index) => (

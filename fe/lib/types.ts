@@ -109,6 +109,23 @@ export interface Order {
   updatedAt: string;
 }
 
+export interface SellerOrder {
+  id: string;
+  buyerName: string;
+  buyerEmail: string;
+  status: OrderStatus;
+  total: number;
+  date: string;
+  items: Array<{
+    productId: string;
+    productName: string;
+    size: string;
+    quantity: number;
+    price: number;
+    image: string;
+  }>;
+}
+
 /* Shipping and Checkout Types */
 export interface ShippingAddress {
   fullName: string;

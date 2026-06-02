@@ -32,6 +32,15 @@ export class ProductController {
   }
 
   /**
+   * GET /products/categories
+   * Public — list all categories.
+   */
+  @Get('categories')
+  findAllCategories() {
+    return this.productService.findAllCategories();
+  }
+
+  /**
    * GET /products/:id
    * Public — get a single product.
    */

@@ -6,7 +6,7 @@ interface ProductCardProps {
 }
 
 export function ProductCard({ product }: ProductCardProps) {
-  const imageUrl = product.images[0] || "/placeholder-shoe.jpg";
+  const imageUrl = product.images[0] || "/placeholder.jpg";
 
   return (
     <Link

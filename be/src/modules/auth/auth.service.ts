@@ -12,6 +12,7 @@ import { AuthenticatedRequest } from '../../common/interfaces/authenticated-requ
 import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import {
   generateSessionToken,
   hashPassword,
@@ -68,6 +69,20 @@ export class AuthService {
     await this.issueSession(user, req, res);
 
     return { user: this.serializeUser(user) };
+  }
+
+  async updateProfile(
+    dto: UpdateProfileDto,
+    user: AuthenticatedUser,
+  ): Promise<{ user: PublicUser }> {
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        ...(dto.name && { name: dto.name.trim() }),
+      },
+    });
+
+    return { user: this.serializeUser(updated) };
   }
 
   async login(

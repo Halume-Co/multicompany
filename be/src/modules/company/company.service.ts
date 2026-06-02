@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { UpdateCompanyDto } from './dto/update-company.dto';
 import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { normalizeEmail } from '../auth/auth.utils';
 
@@ -63,6 +64,56 @@ export class CompanyService {
     });
 
     return company;
+  }
+
+  /**
+   * Update the company profile for the authenticated seller.
+   */
+  async update(dto: UpdateCompanyDto, user: AuthenticatedUser) {
+    if (!user.companyId) {
+      throw new NotFoundException('No company associated with your account');
+    }
+
+    const existing = await this.prisma.company.findUnique({
+      where: { id: user.companyId },
+    });
+    if (!existing) {
+      throw new NotFoundException('Company not found');
+    }
+
+    if (dto.name) {
+      const trimmedName = dto.name.trim();
+      const existingByName = await this.prisma.company.findFirst({
+        where: { name: trimmedName, id: { not: user.companyId } },
+      });
+      if (existingByName) {
+        throw new ConflictException(`Company name "${trimmedName}" is taken`);
+      }
+      dto.name = trimmedName;
+    }
+
+    if (dto.email) {
+      const normalizedEmail = normalizeEmail(dto.email);
+      const existingByEmail = await this.prisma.company.findFirst({
+        where: { email: normalizedEmail, id: { not: user.companyId } },
+      });
+      if (existingByEmail) {
+        throw new ConflictException(`Email "${normalizedEmail}" is already used by another company`);
+      }
+      dto.email = normalizedEmail;
+    }
+
+    return this.prisma.company.update({
+      where: { id: user.companyId },
+      data: {
+        ...(dto.name && { name: dto.name }),
+        ...(dto.email && { email: dto.email }),
+        ...(dto.description !== undefined && { description: dto.description?.trim() || null }),
+        ...(dto.logoUrl !== undefined && { logoUrl: dto.logoUrl?.trim() || null }),
+        ...(dto.phone !== undefined && { phone: dto.phone?.trim() || null }),
+        ...(dto.address !== undefined && { address: dto.address?.trim() || null }),
+      },
+    });
   }
 
   /**

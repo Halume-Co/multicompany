@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/button";
@@ -29,10 +29,15 @@ const defaultSizes = [
   { size: 45, stock: 0 },
 ];
 
-export default function NewProductPage() {
+export default function EditProductPage() {
+  const params = useParams();
+  const id = params.id as string;
+  
   const { canRender } = useSellerAccess();
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
+  
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [categories, setCategories] = useState<api.Category[]>([]);
   
   // Image handling state
@@ -49,17 +54,66 @@ export default function NewProductPage() {
   });
 
   useEffect(() => {
-    api.getCategories().then((res) => {
-      if (res.success && res.data) {
-        setCategories(res.data);
-        if (res.data.length > 0) {
-          setFormData((prev) => ({ ...prev, categoryId: res.data[0].id }));
+    if (!id) return;
+
+    const fetchData = async () => {
+      try {
+        const [catsRes, productRes] = await Promise.all([
+          api.getCategories(),
+          api.getProduct(id)
+        ]);
+
+        if (catsRes.success && catsRes.data) {
+          setCategories(catsRes.data);
         }
+
+        if (productRes.success && productRes.data) {
+          const p = productRes.data;
+          
+          // Map product sizes to our default sizes structure
+          const mappedSizes = defaultSizes.map(ds => {
+            const found = p.sizes.find(ps => parseInt(ps.size) === ds.size);
+            return found ? { size: ds.size, stock: found.stock } : ds;
+          });
+
+          // Also check for sizes not in our default list
+          p.sizes.forEach(ps => {
+            const sizeInt = parseInt(ps.size);
+            if (!mappedSizes.find(ms => ms.size === sizeInt)) {
+              mappedSizes.push({ size: sizeInt, stock: ps.stock });
+            }
+          });
+
+          setFormData({
+            name: p.name,
+            description: p.description,
+            price: p.price,
+            categoryId: catsRes.data?.find(c => c.name === p.category)?.id || "",
+            imageUrl: p.images[0] || "",
+            sizes: mappedSizes.sort((a, b) => a.size - b.size),
+          });
+          
+          if (p.images[0]) {
+            setImagePreviews([p.images[0]]);
+          }
+        } else {
+          alert("Product not found");
+          router.push("/seller/products");
+        }
+      } catch (error) {
+        console.error("Error fetching product data:", error);
+      } finally {
+        setIsLoading(false);
       }
-    });
-  }, []);
+    };
+
+    fetchData();
+  }, [id, router]);
 
   useEffect(() => {
+    // Only generate previews for NEWLY selected files
+    if (imageFiles.length === 0) return;
+
     const previews = imageFiles.map((file) => URL.createObjectURL(file));
     setImagePreviews(previews);
 
@@ -68,8 +122,17 @@ export default function NewProductPage() {
     };
   }, [imageFiles]);
 
-  if (!canRender) {
-    return null;
+  if (!canRender || isLoading) {
+    return (
+      <>
+        <Header />
+        <main className="bg-background">
+          <div className="max-w-5xl mx-auto px-lg py-3xl text-center">
+            <p className="text-muted-foreground animate-pulse">Loading product data...</p>
+          </div>
+        </main>
+      </>
+    );
   }
 
   const handleInputChange = (
@@ -94,11 +157,18 @@ export default function NewProductPage() {
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setImageFiles(normalizeImageFiles(e.target.files || []));
+    const files = normalizeImageFiles(e.target.files || []);
+    setImageFiles(files);
   };
 
   const removeImage = (index: number) => {
-    setImageFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index));
+    if (imageFiles.length > 0) {
+      setImageFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index));
+    } else {
+      // If we are removing an existing image
+      setImagePreviews([]);
+      setFormData(prev => ({ ...prev, imageUrl: "" }));
+    }
   };
 
   const normalizeImageFiles = (files: FileList | File[]) => {
@@ -109,18 +179,12 @@ export default function NewProductPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    setIsSaving(true);
 
     try {
-      // Logic for imageUrl:
-      // 1. If user provided a manual URL, use it.
-      // 2. If user uploaded files but no URL, use a placeholder for now 
-      //    (since we don't have a real file upload backend yet).
-      // 3. Fallback to a default placeholder.
       let finalImageUrl = formData.imageUrl;
-      if (!finalImageUrl && imageFiles.length > 0) {
-        // In a real app, you'd upload the file here. 
-        // For now, we'll use a real shoe image from Unsplash as a visual indicator.
+      if (imageFiles.length > 0) {
+        // Mock upload
         finalImageUrl = "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=600&q=80"; 
       }
 
@@ -132,21 +196,21 @@ export default function NewProductPage() {
 
       if (payload.sizes.length === 0) {
         alert("Please add stock for at least one size");
-        setIsLoading(false);
+        setIsSaving(false);
         return;
       }
 
-      const res = await api.createProduct(payload);
+      const res = await api.updateProduct(id, payload);
       if (res.success) {
         router.push("/seller/products");
       } else {
-        alert("Failed to create product: " + (res.error || "Unknown error"));
+        alert("Failed to update product: " + (res.error || "Unknown error"));
       }
     } catch (error) {
       alert("An unexpected error occurred");
       console.error(error);
     } finally {
-      setIsLoading(false);
+      setIsSaving(false);
     }
   };
 
@@ -157,10 +221,10 @@ export default function NewProductPage() {
         <div className="max-w-5xl mx-auto px-lg py-3xl">
           <div className="mb-3xl">
             <h1 className="text-4xl font-semibold leading-[1.1] text-foreground mb-sm">
-              Add New Product
+              Edit Product
             </h1>
             <p className="text-muted-foreground">
-              Create and list a new shoe product for sale
+              Update your shoe product details and inventory
             </p>
           </div>
 
@@ -246,9 +310,6 @@ export default function NewProductPage() {
                   onChange={handleInputChange}
                   placeholder="https://example.com/my-shoe.jpg"
                 />
-                <p className="text-xs text-muted-foreground mt-xs">
-                  If provided, this URL will be used directly.
-                </p>
               </div>
             </div>
 
@@ -259,59 +320,31 @@ export default function NewProductPage() {
 
               <label
                 htmlFor="product-images"
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setImageFiles(normalizeImageFiles(event.dataTransfer.files));
-                }}
-                className="block rounded-lg border border-dashed border-border bg-secondary p-2xl text-center transition hover:border-primary hover:bg-background focus-within:ring-2 focus-within:ring-ring"
+                className="block rounded-lg border border-dashed border-border bg-secondary p-2xl text-center transition hover:border-primary hover:bg-background cursor-pointer"
               >
                 <input
                   id="product-images"
                   type="file"
-                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  accept="image/*"
                   multiple
                   className="sr-only"
                   onChange={handleImageChange}
                 />
-                <svg
-                  className="w-12 h-12 mx-auto mb-md text-muted-foreground"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                  />
-                </svg>
-                <p className="text-foreground font-medium">
-                  Click to upload images (Preview only)
-                </p>
-                <p className="text-sm text-muted-foreground mt-sm">
-                  PNG, JPG, GIF, or WebP up to 10MB each. You can select up to
-                  6 images.
-                </p>
-                {imageFiles.length > 0 && (
-                  <p className="mt-md text-sm font-medium text-primary">
-                    {imageFiles.length} image{imageFiles.length > 1 ? "s" : ""} selected
-                  </p>
-                )}
+                <p className="text-foreground font-medium">Click to change images</p>
+                <p className="text-sm text-muted-foreground mt-sm">Leave empty to keep current image</p>
               </label>
 
               {imagePreviews.length > 0 && (
                 <div className="grid sm:grid-cols-3 gap-md">
                   {imagePreviews.map((preview, index) => (
                     <div
-                      key={preview}
+                      key={index}
                       className="relative aspect-square rounded-md overflow-hidden border border-border bg-secondary"
                     >
                       <img
                         src={preview}
                         alt={`Product preview ${index + 1}`}
-                        className="w-full h-full object-cover"
+                        className="h-full w-full object-cover"
                       />
                       <button
                         type="button"
@@ -353,23 +386,14 @@ export default function NewProductPage() {
                   </div>
                 ))}
               </div>
-
-              <div className="bg-secondary p-md rounded-sm">
-                <p className="text-sm text-foreground">
-                  Total Stock:{" "}
-                  <span className="font-bold">
-                    {formData.sizes.reduce((sum, size) => sum + size.stock, 0)}
-                  </span>
-                </p>
-              </div>
             </div>
 
             <div className="flex gap-md justify-end">
               <Button variant="outline" asChild>
                 <Link href="/seller/products">Cancel</Link>
               </Button>
-              <Button type="submit" disabled={isLoading} size="lg">
-                {isLoading ? "Creating..." : "Create Product"}
+              <Button type="submit" disabled={isSaving} size="lg">
+                {isSaving ? "Saving..." : "Save Changes"}
               </Button>
             </div>
           </form>

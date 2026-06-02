@@ -1,62 +1,82 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { useSellerAccess } from "@/lib/hooks/useSellerAccess";
+import { SellerOrder } from "@/lib/types";
+import * as api from "@/lib/api";
 
-const mockStats = {
-  totalProducts: 24,
-  activeListings: 18,
-  orders: 156,
-  revenue: 12450.5,
-};
+interface DashboardStats {
+  totalProducts: number;
+  orders: number;
+  revenue: number;
+}
 
-const mockRecentOrders = [
-  {
-    id: "ORD001",
-    buyerName: "John Smith",
-    product: "Classic Air Max",
-    quantity: 1,
-    total: 129.99,
-    status: "shipped" as const,
-    date: "2024-12-15",
-  },
-  {
-    id: "ORD002",
-    buyerName: "Sarah Johnson",
-    product: "Urban Street Style",
-    quantity: 2,
-    total: 179.98,
-    status: "processing" as const,
-    date: "2024-12-14",
-  },
-  {
-    id: "ORD003",
-    buyerName: "Mike Davis",
-    product: "Performance Court",
-    quantity: 1,
-    total: 149.99,
-    status: "delivered" as const,
-    date: "2024-12-13",
-  },
-  {
-    id: "ORD004",
-    buyerName: "Emily Brown",
-    product: "Minimalist Slip-On",
-    quantity: 3,
-    total: 239.97,
-    status: "pending" as const,
-    date: "2024-12-12",
-  },
-];
+function getStatusColor(status: string) {
+  switch (status) {
+    case "delivered":
+      return "bg-primary/10 text-primary";
+    case "shipped":
+      return "bg-blue-100 text-blue-700";
+    case "paid":
+      return "bg-green-100 text-green-700";
+    case "pending":
+      return "bg-gray-100 text-gray-700";
+    case "cancelled":
+      return "bg-red-100 text-red-700";
+    default:
+      return "bg-gray-100 text-gray-700";
+  }
+}
 
 export default function SellerDashboardPage() {
   const { user, canRender } = useSellerAccess();
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [recentOrders, setRecentOrders] = useState<SellerOrder[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  if (!canRender) {
-    return null;
-  }
+  useEffect(() => {
+    if (!user?.companyId) return;
+
+    Promise.all([
+      api.getSellerProducts(user.companyId),
+      api.getSellerOrders(),
+    ]).then(([productsRes, ordersRes]) => {
+      const products =
+        productsRes.success && productsRes.data ? productsRes.data : [];
+      const orders =
+        ordersRes.success && ordersRes.data
+          ? (ordersRes.data as SellerOrder[])
+          : [];
+
+      const revenue = orders.reduce((sum, o) => sum + o.total, 0);
+
+      setStats({
+        totalProducts: products.length,
+        orders: orders.length,
+        revenue,
+      });
+
+      setRecentOrders(orders.slice(0, 5));
+      setIsLoading(false);
+    });
+  }, [user?.companyId]);
+
+  if (!canRender) return null;
+
+  const statCards = stats
+    ? [
+        { label: "Total Products", value: stats.totalProducts },
+        { label: "Total Orders", value: stats.orders },
+        { label: "Revenue", value: `$${stats.revenue.toFixed(2)}` },
+      ]
+    : [
+        { label: "Total Products", value: "—" },
+        { label: "Total Orders", value: "—" },
+        { label: "Revenue", value: "—" },
+      ];
 
   return (
     <>
@@ -68,25 +88,15 @@ export default function SellerDashboardPage() {
               <h1 className="text-4xl font-bold text-foreground mb-sm">
                 Seller Dashboard
               </h1>
-              <p className="text-muted-foreground">
-                Welcome back, {user?.name}
-              </p>
+              <p className="text-muted-foreground">Welcome back, {user?.name}</p>
             </div>
             <Button asChild>
               <Link href="/seller/products/new">Add New Product</Link>
             </Button>
           </div>
 
-          <div className="grid md:grid-cols-4 gap-lg mb-3xl">
-            {[
-              { label: "Total Products", value: mockStats.totalProducts },
-              { label: "Active Listings", value: mockStats.activeListings },
-              { label: "Orders", value: mockStats.orders },
-              {
-                label: "Revenue",
-                value: `$${mockStats.revenue.toFixed(2)}`,
-              },
-            ].map((stat, index) => (
+          <div className="grid md:grid-cols-3 gap-lg mb-3xl">
+            {statCards.map((stat, index) => (
               <div
                 key={index}
                 className="border border-border rounded-lg p-lg bg-secondary/30"
@@ -94,7 +104,11 @@ export default function SellerDashboardPage() {
                 <p className="text-sm text-muted-foreground mb-sm">
                   {stat.label}
                 </p>
-                <p className="text-3xl font-bold text-foreground">
+                <p
+                  className={`text-3xl font-bold text-foreground ${
+                    isLoading ? "animate-pulse" : ""
+                  }`}
+                >
                   {stat.value}
                 </p>
               </div>
@@ -128,87 +142,106 @@ export default function SellerDashboardPage() {
                 Recent Orders
               </h2>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-secondary/30 border-b border-border">
-                  <tr>
-                    <th className="text-left px-lg py-md text-sm font-medium text-foreground">
-                      Order ID
-                    </th>
-                    <th className="text-left px-lg py-md text-sm font-medium text-foreground">
-                      Customer
-                    </th>
-                    <th className="text-left px-lg py-md text-sm font-medium text-foreground">
-                      Product
-                    </th>
-                    <th className="text-right px-lg py-md text-sm font-medium text-foreground">
-                      Amount
-                    </th>
-                    <th className="text-left px-lg py-md text-sm font-medium text-foreground">
-                      Status
-                    </th>
-                    <th className="text-right px-lg py-md text-sm font-medium text-foreground">
-                      Date
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mockRecentOrders.map((order, index) => (
-                    <tr
-                      key={order.id}
-                      className={`border-b border-border hover:bg-secondary/20 transition ${
-                        index % 2 ? "bg-secondary/10" : ""
-                      }`}
-                    >
-                      <td className="px-lg py-md text-sm font-medium text-primary">
-                        <Link
-                          href={`/seller/orders/${order.id}`}
-                          className="hover:underline"
-                        >
-                          {order.id}
-                        </Link>
-                      </td>
-                      <td className="px-lg py-md text-sm text-foreground">
-                        {order.buyerName}
-                      </td>
-                      <td className="px-lg py-md text-sm text-foreground">
-                        {order.product}
-                      </td>
-                      <td className="px-lg py-md text-sm font-medium text-foreground text-right">
-                        ${order.total.toFixed(2)}
-                      </td>
-                      <td className="px-lg py-md text-sm">
-                        <span
-                          className={`px-md py-xs rounded-full text-xs font-medium ${
-                            order.status === "delivered"
-                              ? "bg-primary/10 text-primary"
-                              : order.status === "shipped"
-                                ? "bg-blue-100 text-blue-700"
-                                : order.status === "processing"
-                                  ? "bg-yellow-100 text-yellow-700"
-                                  : "bg-gray-100 text-gray-700"
-                          }`}
-                        >
-                          {order.status.charAt(0).toUpperCase() +
-                            order.status.slice(1)}
-                        </span>
-                      </td>
-                      <td className="px-lg py-md text-sm text-muted-foreground text-right">
-                        {order.date}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-lg py-md border-t border-border">
-              <Link
-                href="/seller/orders"
-                className="text-sm text-primary font-medium hover:underline"
-              >
-                View all orders{" ->"}
-              </Link>
-            </div>
+            {isLoading ? (
+              <div className="p-lg space-y-md">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-12 bg-border rounded animate-pulse" />
+                ))}
+              </div>
+            ) : recentOrders.length === 0 ? (
+              <div className="p-3xl text-center text-muted-foreground">
+                No orders yet.
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-secondary/30 border-b border-border">
+                      <tr>
+                        <th className="text-left px-lg py-md text-sm font-medium text-foreground">
+                          Order ID
+                        </th>
+                        <th className="text-left px-lg py-md text-sm font-medium text-foreground">
+                          Customer
+                        </th>
+                        <th className="text-left px-lg py-md text-sm font-medium text-foreground">
+                          Product
+                        </th>
+                        <th className="text-right px-lg py-md text-sm font-medium text-foreground">
+                          Amount
+                        </th>
+                        <th className="text-left px-lg py-md text-sm font-medium text-foreground">
+                          Status
+                        </th>
+                        <th className="text-right px-lg py-md text-sm font-medium text-foreground">
+                          Date
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentOrders.map((order, index) => {
+                        const firstItem = order.items[0];
+                        const itemLabel = firstItem
+                          ? `${firstItem.productName}${
+                              order.items.length > 1
+                                ? ` +${order.items.length - 1} more`
+                                : ""
+                            }`
+                          : "—";
+
+                        return (
+                          <tr
+                            key={order.id}
+                            className={`border-b border-border hover:bg-secondary/20 transition ${
+                              index % 2 ? "bg-secondary/10" : ""
+                            }`}
+                          >
+                            <td className="px-lg py-md text-sm font-medium text-primary">
+                              <Link
+                                href={`/seller/orders/${order.id}`}
+                                className="hover:underline"
+                              >
+                                {order.id.slice(0, 8).toUpperCase()}
+                              </Link>
+                            </td>
+                            <td className="px-lg py-md text-sm text-foreground">
+                              {order.buyerName}
+                            </td>
+                            <td className="px-lg py-md text-sm text-foreground">
+                              {itemLabel}
+                            </td>
+                            <td className="px-lg py-md text-sm font-medium text-foreground text-right">
+                              ${order.total.toFixed(2)}
+                            </td>
+                            <td className="px-lg py-md text-sm">
+                              <span
+                                className={`px-md py-xs rounded-full text-xs font-medium ${getStatusColor(
+                                  order.status,
+                                )}`}
+                              >
+                                {order.status.charAt(0).toUpperCase() +
+                                  order.status.slice(1)}
+                              </span>
+                            </td>
+                            <td className="px-lg py-md text-sm text-muted-foreground text-right">
+                              {new Date(order.date).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-lg py-md border-t border-border">
+                  <Link
+                    href="/seller/orders"
+                    className="text-sm text-primary font-medium hover:underline"
+                  >
+                    View all orders →
+                  </Link>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </main>

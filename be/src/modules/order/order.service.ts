@@ -1,12 +1,14 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CartItem, Company, Prisma, Product, ProductSize } from '@prisma/client';
+import { CartItem, Company, OrderStatus, Prisma, Product, ProductSize } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { CheckoutDto } from './dto/checkout.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 
 type CartItemWithProduct = CartItem & {
   product: Product & { company: Company; sizes: ProductSize[] };
@@ -210,6 +212,41 @@ export class OrderService {
       grandTotal: parseFloat(grandTotal.toFixed(2)),
       orders: createdOrders.map((o) => this.serializeOrder(o)),
     };
+  }
+
+  /**
+   * Seller: update order status (e.g., PENDING -> SHIPPED).
+   */
+  async updateOrderStatus(
+    id: string,
+    dto: UpdateOrderStatusDto,
+    user: AuthenticatedUser,
+  ) {
+    const order = await this.prisma.order.findUnique({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order with id "${id}" not found`);
+    }
+
+    if (order.companyId !== user.companyId) {
+      throw new ForbiddenException(
+        'You can only update orders belonging to your company',
+      );
+    }
+
+    const updated = await this.prisma.order.update({
+      where: { id },
+      data: { status: dto.status },
+      include: {
+        company: { select: { id: true, name: true } },
+        items: {
+          include: {
+            product: { select: { id: true, name: true, imageUrl: true } },
+          },
+        },
+      },
+    });
+
+    return this.serializeOrder(updated as OrderWithCompany);
   }
 
   async getBuyerOrders(user: AuthenticatedUser) {

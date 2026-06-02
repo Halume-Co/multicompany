@@ -66,7 +66,7 @@ export default function CartPage() {
                     >
                       <div className="h-24 w-24 overflow-hidden rounded-sm bg-secondary">
                         <img
-                          src={item.product.images[0]}
+                          src={item.product.images[0] || "/placeholder.jpg"}
                           alt={item.product.name}
                           className="h-full w-full object-cover"
                         />

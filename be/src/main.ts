@@ -23,10 +23,15 @@ async function bootstrap() {
 
   app.enableCors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+      if (!origin) return callback(null, true);
 
+      const isAllowed =
+        allowedOrigins.includes(origin) ||
+        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+
+      if (isAllowed) return callback(null, true);
+
+      logger.warn(`CORS blocked origin: ${origin}`);
       return callback(new Error('Origin not allowed by CORS'), false);
     },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',

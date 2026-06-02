@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Patch,
   Post,
   Res,
   Req,
@@ -14,6 +15,7 @@ import type { AuthenticatedRequest } from '../../common/interfaces/authenticated
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { AuthService } from './auth.service';
 
 @Controller('auth')
@@ -50,5 +52,14 @@ export class AuthController {
   @UseGuards(AuthGuard)
   me(@CurrentUser() user: AuthenticatedUser) {
     return { user: this.authService.serializeAuthenticatedUser(user) };
+  }
+
+  @Patch('profile')
+  @UseGuards(AuthGuard)
+  updateProfile(
+    @Body() dto: UpdateProfileDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.authService.updateProfile(dto, user);
   }
 }

@@ -5,11 +5,13 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { CompanyService } from './company.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { UpdateCompanyDto } from './dto/update-company.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -36,14 +38,20 @@ export class CompanyController {
   }
 
   /**
-   * GET /companies/me
-   * Seller views their own company profile.
+   * PUT /companies/me
+   * Seller updates their own company profile.
    */
-  @Get('me')
+  @Put('me')
   @UseGuards(SellerGuard)
-  getMyCompany(@CurrentUser() user: AuthenticatedUser) {
-    return this.companyService.getMyCompany(user);
+  update(
+    @Body() dto: UpdateCompanyDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.companyService.update(dto, user);
   }
+
+  /**
+   * GET /companies/me
 
   /**
    * GET /companies

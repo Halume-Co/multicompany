@@ -75,6 +75,12 @@ export class ProductService {
     return this.serializeProduct(product);
   }
 
+  async findAllCategories() {
+    return this.prisma.category.findMany({
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async findAll(query: QueryProductDto) {
     const where: Prisma.ProductWhereInput = { isActive: true };
 

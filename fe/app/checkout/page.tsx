@@ -10,6 +10,8 @@ import { useAuth } from "@/lib/contexts/AuthContext";
 import { useCart } from "@/lib/contexts/CartContext";
 import { ShippingAddress } from "@/lib/types";
 
+import * as api from "@/lib/api";
+
 export default function CheckoutPage() {
   const { cart, clearCart } = useCart();
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -18,6 +20,7 @@ export default function CheckoutPage() {
   const [step, setStep] = useState<"shipping" | "payment" | "confirmation">(
     "shipping"
   );
+  const [orderId, setOrderId] = useState<string | null>(null);
   const [shippingData, setShippingData] = useState<ShippingAddress>({
     fullName: user?.name || "",
     email: user?.email || "",
@@ -96,11 +99,20 @@ export default function CheckoutPage() {
     setIsProcessing(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      clearCart();
-      setStep("confirmation");
-    } catch {
+      const res = await api.createOrder({
+        notes: `Shipping to: ${shippingData.fullName}, ${shippingData.street}, ${shippingData.city}`,
+      });
+
+      if (res.success) {
+        clearCart();
+        setStep("confirmation");
+        // We might get multiple orders if split, but for simplicity we'll just show the confirmation
+      } else {
+        alert("Checkout failed: " + (res.error || "Unknown error"));
+      }
+    } catch (error) {
       alert("Payment failed. Please try again.");
+      console.error(error);
     } finally {
       setIsProcessing(false);
     }

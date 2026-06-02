@@ -12,6 +12,47 @@ import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.in
 export class CartService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private serializeProduct(product: any) {
+    return {
+      id: product.id,
+      name: product.name,
+      description: product.description ?? '',
+      price: Number(product.price),
+      images: product.imageUrl ? [product.imageUrl] : [],
+      sizes: product.sizes
+        .sort((a, b) => a.size - b.size)
+        .map((s: any) => ({ size: String(s.size), stock: s.stock })),
+      sellerId: product.companyId,
+      sellerName: product.company.name,
+      category: product.category.name,
+      rating: 0,
+      reviewCount: 0,
+      createdAt: product.createdAt.toISOString(),
+    };
+  }
+
+  private serializeCart(cart: any) {
+    const items = cart.items.map((item: any) => ({
+      productId: item.productId,
+      size: String(item.size),
+      quantity: item.quantity,
+      price: Number(item.product.price),
+      product: this.serializeProduct(item.product),
+    }));
+
+    const subtotal = items.reduce(
+      (sum: number, item: any) => sum + item.price * item.quantity,
+      0,
+    );
+
+    return {
+      items,
+      subtotal: parseFloat(subtotal.toFixed(2)),
+      tax: 0,
+      total: parseFloat(subtotal.toFixed(2)),
+    };
+  }
+
   // ---------------------------------------------------------------------------
   //  Ensure cart exists (or create it)
   // ---------------------------------------------------------------------------
@@ -37,6 +78,7 @@ export class CartService {
             product: {
               include: {
                 company: { select: { id: true, name: true } },
+                category: { select: { id: true, name: true } },
                 sizes: true,
               },
             },
@@ -47,21 +89,10 @@ export class CartService {
     });
 
     if (!cart) {
-      return { id: null, userId: user.id, items: [], totalItems: 0, subtotal: 0 };
+      return { items: [], subtotal: 0, tax: 0, total: 0 };
     }
 
-    // Compute subtotal
-    const subtotal = cart.items.reduce((sum, item) => {
-      return sum + Number(item.product.price) * item.quantity;
-    }, 0);
-
-    return {
-      id: cart.id,
-      userId: cart.userId,
-      items: cart.items,
-      totalItems: cart.items.length,
-      subtotal: parseFloat(subtotal.toFixed(2)),
-    };
+    return this.serializeCart(cart);
   }
 
   // ---------------------------------------------------------------------------

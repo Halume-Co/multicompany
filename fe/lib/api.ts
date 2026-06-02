@@ -5,8 +5,14 @@ import {
   Order,
   PaginatedResponse,
   Product,
+  SellerOrder,
   User,
 } from "./types";
+
+export interface Category {
+  id: string;
+  name: string;
+}
 
 const BASE_URL = resolveBaseUrl();
 
@@ -14,7 +20,7 @@ interface AuthPayload {
   user: User;
 }
 
-async function fetchAPI<T>(
+export async function fetchAPI<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<ApiResponse<T>> {
@@ -108,6 +114,10 @@ export async function searchProducts(
   return getProducts({ search: query });
 }
 
+export async function getCategories(): Promise<ApiResponse<Category[]>> {
+  return fetchAPI<Category[]>("/products/categories");
+}
+
 export async function getOrder(id: string): Promise<ApiResponse<Order>> {
   return fetchAPI<Order>(`/orders/${id}`);
 }
@@ -168,13 +178,32 @@ export async function deleteProduct(
   });
 }
 
-export async function getSellerOrders(): Promise<ApiResponse<Order[]>> {
-  return fetchAPI<Order[]>("/seller/orders");
+export async function getSellerOrders(): Promise<ApiResponse<SellerOrder[]>> {
+  return fetchAPI<SellerOrder[]>("/seller/orders");
+}
+
+export async function updateOrderStatus(
+  orderId: string,
+  status: string
+): Promise<ApiResponse<SellerOrder>> {
+  return fetchAPI<SellerOrder>(`/seller/orders/${orderId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: status.toUpperCase() }),
+  });
 }
 
 export async function getMyCompany(): Promise<ApiResponse<Company>> {
   return fetchAPI<Company>("/companies/me", {
     cache: "no-store",
+  });
+}
+
+export async function updateMyCompany(
+  data: Partial<CompanyRegistrationInput>
+): Promise<ApiResponse<Company>> {
+  return fetchAPI<Company>("/companies/me", {
+    method: "PUT",
+    body: JSON.stringify(data),
   });
 }
 
