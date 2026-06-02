@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { AddToCartDto } from './dto/add-to-cart.dto';
 import { RemoveFromCartDto } from './dto/remove-from-cart.dto';
+import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 
 @Injectable()
@@ -172,6 +173,61 @@ export class CartService {
       message: 'Item added to cart successfully',
       cartItem,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  //  PATCH /cart/update
+  // ---------------------------------------------------------------------------
+
+  async updateQuantity(dto: UpdateCartItemDto, user: AuthenticatedUser) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: dto.productId },
+      include: { sizes: true },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const productSize = product.sizes.find((s) => s.size === dto.size);
+    if (!productSize) {
+      throw new NotFoundException(`Size ${dto.size} not found`);
+    }
+
+    if (productSize.stock < dto.quantity) {
+      throw new BadRequestException(
+        `Insufficient stock. Available: ${productSize.stock}`,
+      );
+    }
+
+    const cart = await this.prisma.cart.findUnique({
+      where: { userId: user.id },
+    });
+
+    if (!cart) {
+      throw new NotFoundException('Cart not found');
+    }
+
+    const cartItem = await this.prisma.cartItem.findUnique({
+      where: {
+        cartId_productId_size: {
+          cartId: cart.id,
+          productId: dto.productId,
+          size: dto.size,
+        },
+      },
+    });
+
+    if (!cartItem) {
+      throw new NotFoundException('Cart item not found');
+    }
+
+    await this.prisma.cartItem.update({
+      where: { id: cartItem.id },
+      data: { quantity: dto.quantity },
+    });
+
+    return this.getCart(user);
   }
 
   // ---------------------------------------------------------------------------

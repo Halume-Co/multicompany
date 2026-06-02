@@ -135,16 +135,6 @@ export async function createOrder(orderData: {
   });
 }
 
-export async function updateOrderStatus(
-  orderId: string,
-  status: string
-): Promise<ApiResponse<Order>> {
-  return fetchAPI<Order>(`/orders/${orderId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status }),
-  });
-}
-
 export async function getSellerProducts(
   companyId: string
 ): Promise<ApiResponse<Product[]>> {

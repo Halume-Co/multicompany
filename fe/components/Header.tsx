@@ -99,6 +99,12 @@ export function Header() {
                   {showUserMenu && (
                     <div className="absolute right-0 mt-md bg-background border border-border rounded-lg py-sm min-w-48">
                       <Link
+                        href="/profile"
+                        className="block px-lg py-sm text-sm text-foreground hover:bg-secondary transition"
+                      >
+                        My Profile
+                      </Link>
+                      <Link
                         href={primaryHref}
                         className="block px-lg py-sm text-sm text-foreground hover:bg-secondary transition"
                       >

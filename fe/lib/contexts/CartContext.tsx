@@ -99,25 +99,25 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   ) => {
     if (!isAuthenticated) return;
     
-    // The current backend doesn't have a direct "update quantity" endpoint that differs from "add".
-    // Usually, we'd need a PATCH /cart/item or similar. 
-    // Given the current be/src/modules/cart/cart.service.ts, addToCart handles upsert.
-    // However, to set an EXACT quantity, we'd need a different logic or endpoint.
-    // For now, let's assume we might need to implement a "set" logic if needed, 
-    // but the quickest fix for "Proceed to Checkout" is getting sync working.
-    
-    // Simplified: Just re-add or handle via existing endpoints if possible.
-    // If quantity is 0, remove it.
     if (quantity <= 0) {
       await removeFromCart(productId, size);
       return;
     }
     
-    // For this prototype, if the backend doesn't have a 'set' endpoint, 
-    // we'll just refresh and let the user know. 
-    // Let's check if we should add a setQuantity to the backend.
-    // actually, let's just use the current sync.
-    await refreshCart(); 
+    const res = await api.fetchAPI<Cart>("/cart/update", {
+      method: "PATCH",
+      body: JSON.stringify({
+        productId,
+        size,
+        quantity,
+      }),
+    });
+
+    if (res.success && res.data) {
+      setCart(res.data);
+    } else {
+      await refreshCart(); // Fallback to refresh if error
+    }
   };
 
   const clearCart = () => {

@@ -37,7 +37,7 @@ export default function SellerCompanyPage() {
             name: res.data.name,
             description: res.data.description || "",
             logoUrl: res.data.logoUrl || "",
-            email: res.data.email,
+            email: res.data.email || "",
             phone: res.data.phone || "",
             address: res.data.address || "",
           });

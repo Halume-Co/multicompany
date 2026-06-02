@@ -3,12 +3,14 @@ import {
   Controller,
   Delete,
   Get,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
 import { CartService } from './cart.service';
 import { AddToCartDto } from './dto/add-to-cart.dto';
 import { RemoveFromCartDto } from './dto/remove-from-cart.dto';
+import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { AuthGuard } from '../../common/guards/auth.guard';
@@ -37,6 +39,18 @@ export class CartController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.cartService.addToCart(dto, user);
+  }
+
+  /**
+   * PATCH /cart/update
+   * Update the quantity of a specific product+size in the cart.
+   */
+  @Patch('update')
+  updateQuantity(
+    @Body() dto: UpdateCartItemDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.cartService.updateQuantity(dto, user);
   }
 
   /**
