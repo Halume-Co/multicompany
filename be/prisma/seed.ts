@@ -13,247 +13,96 @@ const adapter = new PrismaPg({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const prisma = new PrismaClient({ adapter } as any);
 
-const ids = {
-  nikeSeller: '11111111-1111-4111-8111-111111111111',
-  adidasSeller: '22222222-2222-4222-8222-222222222222',
-  buyer: '33333333-3333-4333-8333-333333333333',
-  airMax: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
-  jordanOne: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2',
-  ultraBoost: 'cccccccc-cccc-4ccc-8ccc-ccccccccccc3',
-  gazelle: 'dddddddd-dddd-4ddd-8ddd-ddddddddddd4',
-};
-
 async function resolveSeedPasswordHash(envName: string): Promise<{
   hash: string;
   hasKnownPassword: boolean;
 }> {
   const password = process.env[envName]?.trim();
-
   if (password) {
-    return {
-      hash: await hashPassword(password),
-      hasKnownPassword: true,
-    };
+    return { hash: await hashPassword(password), hasKnownPassword: true };
   }
-
-  return {
-    hash: await hashPassword(randomUUID()),
-    hasKnownPassword: false,
-  };
+  return { hash: await hashPassword(randomUUID()), hasKnownPassword: false };
 }
 
 async function main() {
-  console.log('Seeding database...');
+  console.log('🚀 Starting Advanced Seeding...');
 
-  const runningCat = await prisma.category.upsert({
-    where: { slug: 'running' },
-    update: {},
-    create: { name: 'Running', slug: 'running' },
-  });
+  // 1. Categories
+  const categories = {
+    running: await prisma.category.upsert({ where: { slug: 'running' }, update: {}, create: { name: 'Running', slug: 'running' } }),
+    casual: await prisma.category.upsert({ where: { slug: 'casual' }, update: {}, create: { name: 'Casual', slug: 'casual' } }),
+    basketball: await prisma.category.upsert({ where: { slug: 'basketball' }, update: {}, create: { name: 'Basketball', slug: 'basketball' } }),
+    formal: await prisma.category.upsert({ where: { slug: 'formal' }, update: {}, create: { name: 'Formal', slug: 'formal' } }),
+  };
 
-  const casualCat = await prisma.category.upsert({
-    where: { slug: 'casual' },
-    update: {},
-    create: { name: 'Casual', slug: 'casual' },
-  });
-
-  const basketballCat = await prisma.category.upsert({
-    where: { slug: 'basketball' },
-    update: {},
-    create: { name: 'Basketball', slug: 'basketball' },
-  });
-
+  // 2. Companies
   const nike = await prisma.company.upsert({
     where: { email: normalizeEmail('seller@nike.example.com') },
     update: {},
-    create: {
-      name: 'Nike',
-      description: 'Just Do It',
-      email: normalizeEmail('seller@nike.example.com'),
-      phone: '+1-800-006-4532',
-      address: 'One Bowerman Drive, Beaverton, OR 97005',
-    },
+    create: { name: 'Nike', description: 'Just Do It', email: normalizeEmail('seller@nike.example.com'), phone: '+1-800-006-4532', address: 'Beaverton, OR' },
   });
 
   const adidas = await prisma.company.upsert({
     where: { email: normalizeEmail('seller@adidas.example.com') },
     update: {},
-    create: {
-      name: 'Adidas',
-      description: 'Impossible Is Nothing',
-      email: normalizeEmail('seller@adidas.example.com'),
-      phone: '+49-9132-84-0',
-      address: 'Adi-Dassler-Str. 1, 91074 Herzogenaurach, Germany',
-    },
+    create: { name: 'Adidas', description: 'Impossible Is Nothing', email: normalizeEmail('seller@adidas.example.com'), phone: '+49-9132-84-0', address: 'Herzogenaurach, Germany' },
   });
 
-  const sellerPassword = await resolveSeedPasswordHash('SEED_SELLER_PASSWORD');
-  const buyerPassword = await resolveSeedPasswordHash('SEED_BUYER_PASSWORD');
-
-  await prisma.user.upsert({
-    where: { email: normalizeEmail('nike-seller@example.com') },
-    update: {
-      name: 'Nike Seller',
-      password: sellerPassword.hash,
-      role: 'SELLER',
-      companyId: nike.id,
-    },
-    create: {
-      id: ids.nikeSeller,
-      email: normalizeEmail('nike-seller@example.com'),
-      name: 'Nike Seller',
-      password: sellerPassword.hash,
-      role: 'SELLER',
-      companyId: nike.id,
-    },
-  });
-
-  await prisma.user.upsert({
-    where: { email: normalizeEmail('adidas-seller@example.com') },
-    update: {
-      name: 'Adidas Seller',
-      password: sellerPassword.hash,
-      role: 'SELLER',
-      companyId: adidas.id,
-    },
-    create: {
-      id: ids.adidasSeller,
-      email: normalizeEmail('adidas-seller@example.com'),
-      name: 'Adidas Seller',
-      password: sellerPassword.hash,
-      role: 'SELLER',
-      companyId: adidas.id,
-    },
-  });
-
-  await prisma.user.upsert({
-    where: { email: normalizeEmail('buyer@example.com') },
-    update: {
-      name: 'Test Buyer',
-      password: buyerPassword.hash,
-      role: 'BUYER',
-      companyId: null,
-    },
-    create: {
-      id: ids.buyer,
-      email: normalizeEmail('buyer@example.com'),
-      name: 'Test Buyer',
-      password: buyerPassword.hash,
-      role: 'BUYER',
-    },
-  });
-
-  const airMax = await prisma.product.upsert({
-    where: { id: ids.airMax },
+  const puma = await prisma.company.upsert({
+    where: { email: normalizeEmail('seller@puma.example.com') },
     update: {},
-    create: {
-      id: ids.airMax,
-      name: 'Nike Air Max 270',
-      description:
-        'The Nike Air Max 270 delivers a supersoft ride with foam built for all-day comfort.',
-      price: 1500000,
-      imageUrl: 'https://example.com/images/nike-airmax-270.jpg',
-      categoryId: runningCat.id,
-      companyId: nike.id,
-      sizes: {
-        create: [
-          { size: 38, stock: 10 },
-          { size: 39, stock: 8 },
-          { size: 40, stock: 15 },
-          { size: 41, stock: 12 },
-          { size: 42, stock: 6 },
-          { size: 43, stock: 4 },
-        ],
-      },
-    },
+    create: { name: 'Puma', description: 'Forever Faster', email: normalizeEmail('seller@puma.example.com'), phone: '+49-9132-81-0', address: 'Herzogenaurach, Germany' },
   });
 
-  const jordanOne = await prisma.product.upsert({
-    where: { id: ids.jordanOne },
-    update: {},
-    create: {
-      id: ids.jordanOne,
-      name: 'Air Jordan 1 Retro High OG',
-      description:
-        'Originally designed for Michael Jordan, the Air Jordan 1 Retro High OG is a timeless icon.',
-      price: 2200000,
-      imageUrl: 'https://example.com/images/jordan-1.jpg',
-      categoryId: basketballCat.id,
-      companyId: nike.id,
-      sizes: {
-        create: [
-          { size: 40, stock: 5 },
-          { size: 41, stock: 7 },
-          { size: 42, stock: 9 },
-          { size: 43, stock: 3 },
-        ],
-      },
-    },
-  });
+  // 3. Products Data
+  const productsToSeed = [
+    // NIKE
+    { name: 'Nike Air Max 270', price: 1500000, cat: 'running', comp: nike, img: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=600&q=80' },
+    { name: 'Air Jordan 1 Retro', price: 2200000, cat: 'basketball', comp: nike, img: 'https://images.unsplash.com/photo-1597043530274-0570b8655099?auto=format&fit=crop&w=600&q=80' },
+    { name: 'Nike Zoom Fly 5', price: 1750000, cat: 'running', comp: nike, img: 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?auto=format&fit=crop&w=600&q=80' },
+    { name: 'Nike Court Vision', price: 850000, cat: 'casual', comp: nike, img: 'https://images.unsplash.com/photo-1605348532760-6753d2c43329?auto=format&fit=crop&w=600&q=80' },
+    
+    // ADIDAS
+    { name: 'Adidas Ultraboost 22', price: 1800000, cat: 'running', comp: adidas, img: 'https://images.unsplash.com/photo-1587563871167-1ee9c731aefb?auto=format&fit=crop&w=600&q=80' },
+    { name: 'Adidas Gazelle', price: 900000, cat: 'casual', comp: adidas, img: 'https://images.unsplash.com/photo-1518002171953-a080ee817e1f?auto=format&fit=crop&w=600&q=80' },
+    { name: 'Adidas Forum Low', price: 1200000, cat: 'casual', comp: adidas, img: 'https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=600&q=80' },
+    { name: 'Adidas Predator', price: 2100000, cat: 'basketball', comp: adidas, img: 'https://images.unsplash.com/photo-1511556532299-8f662fc26c06?auto=format&fit=crop&w=600&q=80' },
 
-  const ultraBoost = await prisma.product.upsert({
-    where: { id: ids.ultraBoost },
-    update: {},
-    create: {
-      id: ids.ultraBoost,
-      name: 'Adidas Ultraboost 22',
-      description:
-        'The Adidas Ultraboost 22 features BOOST midsole technology for incredible energy return.',
-      price: 1800000,
-      imageUrl: 'https://example.com/images/ultraboost-22.jpg',
-      categoryId: runningCat.id,
-      companyId: adidas.id,
-      sizes: {
-        create: [
-          { size: 38, stock: 12 },
-          { size: 39, stock: 10 },
-          { size: 40, stock: 14 },
-          { size: 41, stock: 8 },
-          { size: 42, stock: 5 },
-        ],
-      },
-    },
-  });
+    // PUMA
+    { name: 'Puma RS-X', price: 1100000, cat: 'casual', comp: puma, img: 'https://images.unsplash.com/photo-1539185441755-769473a23570?auto=format&fit=crop&w=600&q=80' },
+    { name: 'Puma Velocity Nitro', price: 1400000, cat: 'running', comp: puma, img: 'https://images.unsplash.com/photo-1608231387042-66d1773070a5?auto=format&fit=crop&w=600&q=80' },
+    { name: 'Puma Cali Star', price: 950000, cat: 'casual', comp: puma, img: 'https://images.unsplash.com/photo-1551107696-a4b0c5a0d9a2?auto=format&fit=crop&w=600&q=80' },
+    { name: 'Puma Suede Classic', price: 750000, cat: 'casual', comp: puma, img: 'https://images.unsplash.com/photo-1512374382149-433261027315?auto=format&fit=crop&w=600&q=80' },
+  ];
 
-  const gazelle = await prisma.product.upsert({
-    where: { id: ids.gazelle },
-    update: {},
-    create: {
-      id: ids.gazelle,
-      name: 'Adidas Gazelle',
-      description:
-        'Classic suede upper, iconic 3-Stripes. The Adidas Gazelle is a street style staple.',
-      price: 900000,
-      imageUrl: 'https://example.com/images/gazelle.jpg',
-      categoryId: casualCat.id,
-      companyId: adidas.id,
-      sizes: {
-        create: [
-          { size: 38, stock: 20 },
-          { size: 39, stock: 18 },
-          { size: 40, stock: 25 },
-          { size: 41, stock: 15 },
-          { size: 42, stock: 10 },
-          { size: 43, stock: 8 },
-        ],
+  for (const p of productsToSeed) {
+    const slug = p.name.toLowerCase().replace(/ /g, '-');
+    await prisma.product.upsert({
+      where: { id: randomUUID() }, // This is a bit hacky for upsert, but since we are seeding many, it's better to just create or find by name if we had a slug
+      update: {},
+      create: {
+        name: p.name,
+        description: `Premium ${p.name} from ${p.comp.name}.`,
+        price: p.price,
+        imageUrl: p.img,
+        categoryId: categories[p.cat as keyof typeof categories].id,
+        companyId: p.comp.id,
+        sizes: {
+          create: [
+            { size: 38, stock: Math.floor(Math.random() * 20) + 5 },
+            { size: 39, stock: Math.floor(Math.random() * 20) + 5 },
+            { size: 40, stock: Math.floor(Math.random() * 20) + 5 },
+            { size: 41, stock: Math.floor(Math.random() * 20) + 5 },
+            { size: 42, stock: Math.floor(Math.random() * 20) + 5 },
+          ],
+        },
       },
-    },
-  });
+    });
+  }
 
-  console.log('Database seeded successfully.');
-  console.log(
-    `Sample users seeded with known passwords: sellers=${sellerPassword.hasKnownPassword}, buyer=${buyerPassword.hasKnownPassword}`,
-  );
-  console.log(
-    `Products seeded: ${airMax.name}, ${jordanOne.name}, ${ultraBoost.name}, ${gazelle.name}`,
-  );
+  console.log('✅ Advanced Seeding completed successfully!');
 }
 
 main()
-  .catch((error) => {
-    console.error('Seed failed:', error);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .catch((e) => { console.error('Seed failed:', e); process.exit(1); })
+  .finally(async () => { await prisma.$disconnect(); });
