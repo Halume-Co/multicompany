@@ -33,6 +33,7 @@ export default function CheckoutPage() {
   });
   const [paymentMethod, setPaymentMethod] = useState("card");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   const isShippingComplete = step === "payment" || step === "confirmation";
   const isPaymentComplete = step === "confirmation";
 
@@ -47,7 +48,7 @@ export default function CheckoutPage() {
   }, [user]);
 
   useEffect(() => {
-    if (isAuthLoading || isCartLoading) {
+    if (isAuthLoading || isCartLoading || isSuccess) {
       return;
     }
 
@@ -59,7 +60,7 @@ export default function CheckoutPage() {
     if (cart.items.length === 0 && step !== "confirmation") {
       router.replace("/cart");
     }
-  }, [cart.items.length, isAuthenticated, isAuthLoading, isCartLoading, router, step]);
+  }, [cart.items.length, isAuthenticated, isAuthLoading, isCartLoading, router, step, isSuccess]);
 
   if (isAuthLoading || isCartLoading) {
     return (
@@ -74,6 +75,10 @@ export default function CheckoutPage() {
         </main>
       </>
     );
+  }
+
+  if (isSuccess) {
+    return null; // Let the router.push handle navigation
   }
 
   if (!isAuthenticated || (cart.items.length === 0 && step !== "confirmation")) {
@@ -119,15 +124,17 @@ export default function CheckoutPage() {
       });
 
       if (res.success && res.data) {
+        setIsSuccess(true);
         // Store order details for the success page
         sessionStorage.setItem("lastOrder", JSON.stringify({
           grandTotal: res.data.grandTotal,
           orders: res.data.orders
         }));
-        
+
         clearCart();
         router.push("/checkout/success");
-      } else {
+      }
+ else {
         alert("Checkout failed: " + (res.error || "Unknown error"));
       }
     } catch (error) {
