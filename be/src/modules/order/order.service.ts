@@ -9,10 +9,7 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-us
 import { CheckoutDto } from './dto/checkout.dto';
 
 type CartItemWithProduct = CartItem & {
-  product: Product & {
-    company: Company;
-    sizes: ProductSize[];
-  };
+  product: Product & { company: Company; sizes: ProductSize[] };
 };
 
 interface CompanyOrderGroup {
@@ -22,9 +19,20 @@ interface CompanyOrderGroup {
   totalPrice: number;
 }
 
-type OrderWithDetails = Prisma.OrderGetPayload<{
+type OrderWithCompany = Prisma.OrderGetPayload<{
   include: {
     company: { select: { id: true; name: true } };
+    items: {
+      include: {
+        product: { select: { id: true; name: true; imageUrl: true } };
+      };
+    };
+  };
+}>;
+
+type OrderWithUser = Prisma.OrderGetPayload<{
+  include: {
+    user: { select: { id: true; name: true; email: true } };
     items: {
       include: {
         product: { select: { id: true; name: true; imageUrl: true } };
@@ -37,6 +45,54 @@ type OrderWithDetails = Prisma.OrderGetPayload<{
 export class OrderService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private serializeOrder(order: OrderWithCompany) {
+    return {
+      id: order.id,
+      buyerId: order.userId,
+      sellerId: order.companyId,
+      status: order.status.toLowerCase(),
+      total: Number(order.totalPrice),
+      subtotal: Number(order.totalPrice),
+      tax: 0,
+      shippingAddress: null,
+      items: order.items.map((item) => ({
+        productId: item.productId,
+        productName: item.product.name,
+        size: String(item.size),
+        quantity: item.quantity,
+        price: Number(item.unitPrice),
+        image: item.product.imageUrl ?? '',
+      })),
+      createdAt: order.createdAt instanceof Date
+        ? order.createdAt.toISOString()
+        : order.createdAt,
+      updatedAt: order.updatedAt instanceof Date
+        ? order.updatedAt.toISOString()
+        : order.updatedAt,
+    };
+  }
+
+  private serializeSellerOrder(order: OrderWithUser) {
+    return {
+      id: order.id,
+      buyerName: order.user.name,
+      buyerEmail: order.user.email,
+      status: order.status.toLowerCase(),
+      total: Number(order.totalPrice),
+      date: order.createdAt instanceof Date
+        ? order.createdAt.toISOString()
+        : order.createdAt,
+      items: order.items.map((item) => ({
+        productId: item.productId,
+        productName: item.product.name,
+        size: String(item.size),
+        quantity: item.quantity,
+        price: Number(item.unitPrice),
+        image: item.product.imageUrl ?? '',
+      })),
+    };
+  }
+
   async checkout(dto: CheckoutDto, user: AuthenticatedUser) {
     const createdOrders = await this.prisma.$transaction(async (tx) => {
       const cart = await tx.cart.findUnique({
@@ -44,12 +100,7 @@ export class OrderService {
         include: {
           items: {
             include: {
-              product: {
-                include: {
-                  company: true,
-                  sizes: true,
-                },
-              },
+              product: { include: { company: true, sizes: true } },
             },
           },
         },
@@ -62,16 +113,14 @@ export class OrderService {
       }
 
       const cartItems = cart.items as CartItemWithProduct[];
+
       const cartItemVersionConditions = cartItems.map((item) => ({
         id: item.id,
         updatedAt: item.updatedAt,
       }));
 
       const claimedCartItems = await tx.cartItem.deleteMany({
-        where: {
-          cartId: cart.id,
-          OR: cartItemVersionConditions,
-        },
+        where: { cartId: cart.id, OR: cartItemVersionConditions },
       });
 
       if (claimedCartItems.count !== cartItems.length) {
@@ -81,7 +130,7 @@ export class OrderService {
       }
 
       const groups = this.groupItemsByCompany(cartItems);
-      const orders: OrderWithDetails[] = [];
+      const orders: OrderWithCompany[] = [];
 
       for (const group of groups) {
         for (const item of group.items) {
@@ -108,9 +157,7 @@ export class OrderService {
               size: item.size,
               stock: { gte: item.quantity },
             },
-            data: {
-              stock: { decrement: item.quantity },
-            },
+            data: { stock: { decrement: item.quantity } },
           });
 
           if (stockUpdate.count !== 1) {
@@ -146,7 +193,7 @@ export class OrderService {
           },
         });
 
-        orders.push(order);
+        orders.push(order as OrderWithCompany);
       }
 
       return orders;
@@ -161,14 +208,7 @@ export class OrderService {
       message: 'Checkout successful! Orders have been created.',
       ordersCreated: createdOrders.length,
       grandTotal: parseFloat(grandTotal.toFixed(2)),
-      orders: createdOrders.map((order) => ({
-        orderId: order.id,
-        company: order.company,
-        status: order.status,
-        totalPrice: Number(order.totalPrice),
-        itemCount: order.items.length,
-        items: order.items,
-      })),
+      orders: createdOrders.map((o) => this.serializeOrder(o)),
     };
   }
 
@@ -176,33 +216,22 @@ export class OrderService {
     const orders = await this.prisma.order.findMany({
       where: { userId: user.id },
       include: {
-        company: { select: { id: true, name: true, logoUrl: true } },
+        company: { select: { id: true, name: true } },
         items: {
           include: {
-            product: {
-              select: { id: true, name: true, imageUrl: true, price: true },
-            },
+            product: { select: { id: true, name: true, imageUrl: true } },
           },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    return orders.map((order) => ({
-      ...order,
-      totalPrice: Number(order.totalPrice),
-      items: order.items.map((item) => ({
-        ...item,
-        unitPrice: Number(item.unitPrice),
-      })),
-    }));
+    return orders.map((o) => this.serializeOrder(o as OrderWithCompany));
   }
 
   async getSellerOrders(user: AuthenticatedUser) {
     if (!user.companyId) {
-      throw new BadRequestException(
-        'You are not associated with any company.',
-      );
+      throw new BadRequestException('You are not associated with any company.');
     }
 
     const orders = await this.prisma.order.findMany({
@@ -211,36 +240,25 @@ export class OrderService {
         user: { select: { id: true, name: true, email: true } },
         items: {
           include: {
-            product: {
-              select: { id: true, name: true, imageUrl: true },
-            },
+            product: { select: { id: true, name: true, imageUrl: true } },
           },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    return orders.map((order) => ({
-      ...order,
-      totalPrice: Number(order.totalPrice),
-      items: order.items.map((item) => ({
-        ...item,
-        unitPrice: Number(item.unitPrice),
-      })),
-    }));
+    return orders.map((o) => this.serializeSellerOrder(o as OrderWithUser));
   }
 
   async getOrderById(orderId: string, user: AuthenticatedUser) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
-        company: { select: { id: true, name: true, logoUrl: true } },
+        company: { select: { id: true, name: true } },
         user: { select: { id: true, name: true, email: true } },
         items: {
           include: {
-            product: {
-              select: { id: true, name: true, imageUrl: true, price: true },
-            },
+            product: { select: { id: true, name: true, imageUrl: true } },
           },
         },
       },
@@ -257,19 +275,10 @@ export class OrderService {
       throw new NotFoundException(`Order with id "${orderId}" not found`);
     }
 
-    return {
-      ...order,
-      totalPrice: Number(order.totalPrice),
-      items: order.items.map((item) => ({
-        ...item,
-        unitPrice: Number(item.unitPrice),
-      })),
-    };
+    return this.serializeOrder(order as OrderWithCompany);
   }
 
-  private groupItemsByCompany(
-    items: CartItemWithProduct[],
-  ): CompanyOrderGroup[] {
+  private groupItemsByCompany(items: CartItemWithProduct[]): CompanyOrderGroup[] {
     const groupMap = new Map<string, CompanyOrderGroup>();
 
     for (const item of items) {
@@ -279,9 +288,7 @@ export class OrderService {
       if (groupMap.has(companyId)) {
         const group = groupMap.get(companyId)!;
         group.items.push(item);
-        group.totalPrice = parseFloat(
-          (group.totalPrice + itemTotal).toFixed(2),
-        );
+        group.totalPrice = parseFloat((group.totalPrice + itemTotal).toFixed(2));
       } else {
         groupMap.set(companyId, {
           companyId,
