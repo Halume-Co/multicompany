@@ -13,8 +13,8 @@ import { ShippingAddress } from "@/lib/types";
 import * as api from "@/lib/api";
 
 export default function CheckoutPage() {
-  const { cart, clearCart } = useCart();
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { cart, clearCart, isLoading: isCartLoading } = useCart();
+  const { user, isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const router = useRouter();
 
   const [step, setStep] = useState<"shipping" | "payment" | "confirmation">(
@@ -47,7 +47,7 @@ export default function CheckoutPage() {
   }, [user]);
 
   useEffect(() => {
-    if (isLoading) {
+    if (isAuthLoading || isCartLoading) {
       return;
     }
 
@@ -56,12 +56,27 @@ export default function CheckoutPage() {
       return;
     }
 
-    if (cart.items.length === 0) {
+    if (cart.items.length === 0 && step !== "confirmation") {
       router.replace("/cart");
     }
-  }, [cart.items.length, isAuthenticated, isLoading, router]);
+  }, [cart.items.length, isAuthenticated, isAuthLoading, isCartLoading, router, step]);
 
-  if (isLoading || !isAuthenticated || cart.items.length === 0) {
+  if (isAuthLoading || isCartLoading) {
+    return (
+      <>
+        <Header />
+        <main className="bg-background">
+          <section className="max-w-7xl mx-auto px-lg py-3xl">
+            <div className="h-64 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+            </div>
+          </section>
+        </main>
+      </>
+    );
+  }
+
+  if (!isAuthenticated || (cart.items.length === 0 && step !== "confirmation")) {
     return null;
   }
 
@@ -103,10 +118,15 @@ export default function CheckoutPage() {
         notes: `Shipping to: ${shippingData.fullName}, ${shippingData.street}, ${shippingData.city}`,
       });
 
-      if (res.success) {
+      if (res.success && res.data) {
+        // Store order details for the success page
+        sessionStorage.setItem("lastOrder", JSON.stringify({
+          grandTotal: res.data.grandTotal,
+          orders: res.data.orders
+        }));
+        
         clearCart();
-        setStep("confirmation");
-        // We might get multiple orders if split, but for simplicity we'll just show the confirmation
+        router.push("/checkout/success");
       } else {
         alert("Checkout failed: " + (res.error || "Unknown error"));
       }

@@ -128,8 +128,18 @@ export async function getUserOrders(): Promise<ApiResponse<Order[]>> {
 
 export async function createOrder(orderData: {
   notes?: string;
-}): Promise<ApiResponse<{ ordersCreated: number }>> {
-  return fetchAPI<{ ordersCreated: number }>("/checkout", {
+}): Promise<ApiResponse<{ 
+  message: string;
+  ordersCreated: number;
+  grandTotal: number;
+  orders: SellerOrder[];
+}>> {
+  return fetchAPI<{ 
+    message: string;
+    ordersCreated: number;
+    grandTotal: number;
+    orders: SellerOrder[];
+  }>("/checkout", {
     method: "POST",
     body: JSON.stringify(orderData),
   });
