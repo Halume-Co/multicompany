@@ -8,8 +8,8 @@ import { useAuth } from "@/lib/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 
 export default function CartPage() {
-  const { cart, removeFromCart, updateQuantity } = useCart();
-  const { isAuthenticated } = useAuth();
+  const { cart, removeFromCart, updateQuantity, isLoading: isCartLoading } = useCart();
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
   const router = useRouter();
 
   const handleCheckout = () => {
@@ -19,6 +19,21 @@ export default function CartPage() {
     }
     router.push("/checkout");
   };
+
+  if (isCartLoading || isAuthLoading) {
+    return (
+      <>
+        <Header />
+        <main className="bg-background">
+          <section className="max-w-7xl mx-auto px-lg py-3xl">
+            <div className="h-64 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+            </div>
+          </section>
+        </main>
+      </>
+    );
+  }
 
   return (
     <>

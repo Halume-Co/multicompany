@@ -7,6 +7,7 @@ import { useAuth } from "./AuthContext";
 
 interface CartContextType {
   cart: Cart;
+  isLoading: boolean;
   addToCart: (product: Product, size: string, quantity: number) => Promise<void>;
   removeFromCart: (productId: string, size: string) => Promise<void>;
   updateQuantity: (
@@ -22,7 +23,8 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const [isLoading, setIsLoading] = useState(true);
   const [cart, setCart] = useState<Cart>({
     items: [],
     subtotal: 0,
@@ -31,15 +33,20 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   });
 
   const refreshCart = async () => {
-    if (!isAuthenticated) return;
+    setIsLoading(true);
     const res = await api.fetchAPI<Cart>("/cart");
     if (res.success && res.data) {
       setCart(res.data);
+    } else if (res.success === false && !res.error?.includes("401")) {
+      console.error("Cart refresh failed:", res.error);
     }
+    setIsLoading(false);
   };
 
   // Load cart from server on mount or when auth changes
   useEffect(() => {
+    if (isAuthLoading) return;
+    
     if (isAuthenticated) {
       refreshCart();
     } else {
@@ -49,8 +56,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         tax: 0,
         total: 0,
       });
+      setIsLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isAuthLoading]);
 
   const addToCart = async (product: Product, size: string, quantity: number) => {
     if (!isAuthenticated) {
@@ -137,6 +145,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     <CartContext.Provider
       value={{
         cart,
+        isLoading,
         addToCart,
         removeFromCart,
         updateQuantity,
