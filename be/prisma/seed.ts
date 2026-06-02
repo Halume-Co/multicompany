@@ -38,20 +38,20 @@ async function main() {
   // 2. Companies
   const nike = await prisma.company.upsert({
     where: { email: normalizeEmail('seller@nike.example.com') },
-    update: {},
-    create: { name: 'Nike', description: 'Just Do It', email: normalizeEmail('seller@nike.example.com'), phone: '+1-800-006-4532', address: 'Beaverton, OR' },
+    update: { logoUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=100&h=100&q=80' },
+    create: { name: 'Nike', description: 'Just Do It', email: normalizeEmail('seller@nike.example.com'), phone: '+1-800-006-4532', address: 'Beaverton, OR', logoUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=100&h=100&q=80' },
   });
 
   const adidas = await prisma.company.upsert({
     where: { email: normalizeEmail('seller@adidas.example.com') },
-    update: {},
-    create: { name: 'Adidas', description: 'Impossible Is Nothing', email: normalizeEmail('seller@adidas.example.com'), phone: '+49-9132-84-0', address: 'Herzogenaurach, Germany' },
+    update: { logoUrl: 'https://images.unsplash.com/photo-1518002171953-a080ee817e1f?auto=format&fit=crop&w=100&h=100&q=80' },
+    create: { name: 'Adidas', description: 'Impossible Is Nothing', email: normalizeEmail('seller@adidas.example.com'), phone: '+49-9132-84-0', address: 'Herzogenaurach, Germany', logoUrl: 'https://images.unsplash.com/photo-1518002171953-a080ee817e1f?auto=format&fit=crop&w=100&h=100&q=80' },
   });
 
   const puma = await prisma.company.upsert({
     where: { email: normalizeEmail('seller@puma.example.com') },
-    update: {},
-    create: { name: 'Puma', description: 'Forever Faster', email: normalizeEmail('seller@puma.example.com'), phone: '+49-9132-81-0', address: 'Herzogenaurach, Germany' },
+    update: { logoUrl: 'https://images.unsplash.com/photo-1539185441755-769473a23570?auto=format&fit=crop&w=100&h=100&q=80' },
+    create: { name: 'Puma', description: 'Forever Faster', email: normalizeEmail('seller@puma.example.com'), phone: '+49-9132-81-0', address: 'Herzogenaurach, Germany', logoUrl: 'https://images.unsplash.com/photo-1539185441755-769473a23570?auto=format&fit=crop&w=100&h=100&q=80' },
   });
 
   // 3. Products Data
