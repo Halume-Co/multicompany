@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useCart } from "@/lib/contexts/CartContext";
 import { useAuth } from "@/lib/contexts/AuthContext";
@@ -9,7 +10,20 @@ import { useAuth } from "@/lib/contexts/AuthContext";
 export function Header() {
   const { user, isAuthenticated, logout } = useAuth();
   const { getTotalItems } = useCart();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(searchParams.get("search") || "");
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      router.push(`/?search=${encodeURIComponent(searchQuery.trim())}`);
+    } else {
+      router.push("/");
+    }
+  };
   const primaryHref =
     user?.role === "seller"
       ? user.companyId
@@ -39,27 +53,37 @@ export function Header() {
             <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
               <span className="text-primary-foreground font-bold text-lg">S</span>
             </div>
-            <span className="font-bold text-lg hidden sm:inline">
+            <span className="font-bold text-lg hidden lg:inline">
               Shoe Marketplace
             </span>
           </Link>
 
-          <nav className="hidden md:flex items-center gap-xl">
-            <Link
-              href="/"
-              className="text-sm text-foreground hover:text-primary transition"
-            >
-              Shop
-            </Link>
-            {user?.role === "seller" && (
-              <Link
-                href={primaryHref}
-                className="text-sm text-foreground hover:text-primary transition"
-              >
-                {primaryLabel}
-              </Link>
-            )}
-          </nav>
+          <div className="flex-1 max-w-2xl mx-xl hidden md:block">
+            <form onSubmit={handleSearch} className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search for premium shoes..."
+                className="w-full h-10 pl-10 pr-md bg-secondary border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
+              />
+              <div className="absolute left-sm top-1/2 -translate-y-1/2 text-muted-foreground">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+              </div>
+            </form>
+          </div>
 
           <div className="flex items-center gap-md">
             {isAuthenticated ? (
