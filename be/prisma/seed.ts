@@ -13,7 +13,7 @@ function createClientForUrl(url: string) {
 }
 
 async function main() {
-  console.log('🚀 Starting Multi-Database Federated Seeding (Final Fix)...');
+  console.log('🚀 Starting Multi-Database Federated Seeding (Syncing Enums)...');
 
   const registryPrisma = createClientForUrl(process.env.DATABASE_URL!);
   const testPassword = "Password123!";
@@ -24,7 +24,7 @@ async function main() {
   try {
     await registryPrisma.$executeRawUnsafe(`TRUNCATE TABLE "order_items", "orders", "cart_items", "carts", "sessions", "product_sizes", "products", "categories", "users", "companies" CASCADE`);
   } catch (e) {
-    console.warn('⚠️ Registry cleanup via truncate failed.');
+    console.warn('⚠️ Registry cleanup failed.');
   }
 
   // 1. Global Categories
@@ -69,15 +69,19 @@ async function main() {
     const siloPrisma = createClientForUrl(c.url);
 
     try {
-        // Cleanup Silo before seeding
-        console.log(`   Cleaning up silo database for ${c.name}...`);
+        // CLEANUP SILO
         await siloPrisma.$executeRawUnsafe(`TRUNCATE TABLE "order_items", "orders", "product_sizes", "products", "categories" CASCADE`).catch(() => {});
+
+        // ENSURE ENUM TYPES EXIST IN SILO
+        console.log(`   Ensuring Enum Types in ${c.name} silo...`);
+        await siloPrisma.$executeRawUnsafe(`DO $$ BEGIN CREATE TYPE "OrderStatus" AS ENUM ('PENDING', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED'); EXCEPTION WHEN duplicate_object THEN null; END $$;`);
+        await siloPrisma.$executeRawUnsafe(`DO $$ BEGIN CREATE TYPE "Role" AS ENUM ('BUYER', 'SELLER', 'ADMIN'); EXCEPTION WHEN duplicate_object THEN null; END $$;`);
 
         // Ensure Silo Tables structure
         await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "categories" (id UUID PRIMARY KEY, name TEXT UNIQUE, slug TEXT UNIQUE, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
         await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "products" (id UUID PRIMARY KEY, name TEXT, description TEXT, price DECIMAL(12,2), "imageUrl" TEXT, "isActive" BOOLEAN DEFAULT TRUE, "categoryId" UUID REFERENCES "categories"(id), "companyId" UUID, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
         await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "product_sizes" (id UUID PRIMARY KEY, size INT, stock INT DEFAULT 0, "productId" UUID REFERENCES "products"(id) ON DELETE CASCADE, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW(), UNIQUE("productId", size))`);
-        await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "orders" (id UUID PRIMARY KEY, "totalPrice" DECIMAL(12,2), status TEXT, notes TEXT, "userId" UUID, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
+        await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "orders" (id UUID PRIMARY KEY, "totalPrice" DECIMAL(12,2), status "OrderStatus" DEFAULT 'PENDING', notes TEXT, "userId" UUID, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
         await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "order_items" (id UUID PRIMARY KEY, size INT, quantity INT, "unitPrice" DECIMAL(12,2), "orderId" UUID REFERENCES "orders"(id) ON DELETE CASCADE, "productId" UUID REFERENCES "products"(id), "createdAt" TIMESTAMP DEFAULT NOW())`);
 
         // SYNC ALL CATEGORIES TO THIS SILO
@@ -129,7 +133,7 @@ async function main() {
     }
   }
 
-  console.log('\n✨ ALL DATABASES SYNCHRONIZED, CATEGORIES REPLICATED, AND USERS RESTORED! ✨');
+  console.log('\n✨ ALL DATABASES SYNCHRONIZED AND ENUMS FIXED! ✨');
   await registryPrisma.$disconnect();
 }
 
