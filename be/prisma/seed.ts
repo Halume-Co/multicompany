@@ -13,9 +13,11 @@ function createClientForUrl(url: string) {
 }
 
 async function main() {
-  console.log('🚀 Starting Multi-Database Federated Seeding (Adapter Mode)...');
+  console.log('🚀 Starting Multi-Database Federated Seeding (Restoring Users)...');
 
   const registryPrisma = createClientForUrl(process.env.DATABASE_URL!);
+  const testPassword = "Password123!";
+  const hashedPassword = await hashPassword(testPassword);
 
   // 0. Cleanup Registry
   console.log('🧹 Cleaning up Registry (Main DB)...');
@@ -64,14 +66,37 @@ async function main() {
   const casualCat = await registryPrisma.category.create({ data: { name: 'Casual', slug: 'casual' } });
   const bballCat = await registryPrisma.category.create({ data: { name: 'Basketball', slug: 'basketball' } });
 
-  // 3. Seed Each Silo
+  // 3. Global Users (In Registry)
+  console.log('👤 Seeding Global Users...');
+  
+  // Test Buyer
+  await registryPrisma.user.create({
+    data: {
+      email: normalizeEmail('buyer@example.com'),
+      name: 'Test Buyer',
+      password: hashedPassword,
+      role: 'BUYER',
+    }
+  });
+
+  // Admin
+  await registryPrisma.user.create({
+    data: {
+      email: normalizeEmail('admin@example.com'),
+      name: 'Global Admin',
+      password: hashedPassword,
+      role: 'ADMIN',
+    }
+  });
+
+  // 4. Seed Each Silo & Seller
   for (const c of companies) {
     if (!c.url) {
         console.warn(`⚠️ Skipping ${c.name} - No DATABASE_URL found in .env`);
         continue;
     }
 
-    console.log(`\n🏢 Seeding Silo for: ${c.name}...`);
+    console.log(`\n🏢 Seeding Silo and Seller for: ${c.name}...`);
     
     // Create company in Registry
     await registryPrisma.company.create({
@@ -84,10 +109,21 @@ async function main() {
       },
     });
 
+    // Create Seller for this company in Registry
+    await registryPrisma.user.create({
+        data: {
+            email: normalizeEmail(c.email),
+            name: `${c.name} Seller`,
+            password: hashedPassword,
+            role: 'SELLER',
+            companyId: c.id,
+        }
+    });
+
     const siloPrisma = createClientForUrl(c.url);
 
     try {
-        // Ensure tables exist in Silo (Using raw SQL for robustness)
+        // Ensure tables exist in Silo
         await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "categories" (id UUID PRIMARY KEY, name TEXT UNIQUE, slug TEXT UNIQUE, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
         await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "products" (id UUID PRIMARY KEY, name TEXT, description TEXT, price DECIMAL(12,2), "imageUrl" TEXT, "isActive" BOOLEAN DEFAULT TRUE, "categoryId" UUID REFERENCES "categories"(id), "companyId" UUID, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
         await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "product_sizes" (id UUID PRIMARY KEY, size INT, stock INT DEFAULT 0, "productId" UUID REFERENCES "products"(id) ON DELETE CASCADE, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW(), UNIQUE("productId", size))`);
@@ -141,7 +177,7 @@ async function main() {
                 }
             });
         }
-        console.log(`✅ ${c.name} silo seeded successfully.`);
+        console.log(`✅ ${c.name} silo and seller seeded successfully.`);
     } catch (err) {
         console.error(`❌ Failed to seed silo for ${c.name}:`, err.message);
     } finally {
@@ -149,7 +185,13 @@ async function main() {
     }
   }
 
-  console.log('\n✨ ALL DATABASES SYNCHRONIZED AND SEEDED! ✨');
+  console.log('\n✨ ALL DATABASES SYNCHRONIZED AND USERS RESTORED! ✨');
+  console.log('Test accounts (Password: Password123!):');
+  console.log('- Buyer: buyer@example.com');
+  console.log('- Nike Seller: seller@nike.example.com');
+  console.log('- Adidas Seller: seller@adidas.example.com');
+  console.log('- Puma Seller: seller@puma.example.com');
+  
   await registryPrisma.$disconnect();
 }
 
