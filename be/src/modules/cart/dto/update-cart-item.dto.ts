@@ -6,7 +6,7 @@ export class UpdateCartItemDto {
   productId: string;
 
   @IsInt()
-  @Min(30)
+  @Min(30)  
   @Max(60)
   size: number;
 

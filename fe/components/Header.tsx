@@ -51,7 +51,7 @@ export function Header() {
         <div className="flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-sm">
             <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-lg">S</span>
+              <span className="text-primary-foreground font-bold text-lg">H</span>
             </div>
             <span className="font-bold text-lg hidden lg:inline">
               Halume Marketshoes
