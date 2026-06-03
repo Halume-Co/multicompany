@@ -89,6 +89,11 @@ export class CartService {
     };
   }
 
+  /**
+   * [PRESENTATION] SLIDE 8: DISCOVERY SERVICE - ADD TO CART
+   * Menangkap ID Produk dan ID Brand, menggunakan operasi Upsert di database.
+   * Logic: INSERT INTO cart_items (...) ON DUPLICATE KEY UPDATE qty = qty + 1
+   */
   async addToCart(dto: AddToCartDto, user: AuthenticatedUser) {
     const companies = await this.registryPrisma.company.findMany();
     let productDetails: any = null;
@@ -136,6 +141,11 @@ export class CartService {
     return { message: 'Item added to cart' };
   }
 
+  /**
+   * [PRESENTATION] SLIDE 9: CART SERVICE - UBAH QTY
+   * Memberikan kontrol penuh bagi user untuk menambah/mengurangi qty.
+   * Logic: UPDATE cart_items SET qty = ? WHERE id = ?
+   */
   async updateQuantity(dto: UpdateCartItemDto, user: AuthenticatedUser) {
     const cart = await this.registryPrisma.cart.findUnique({ where: { userId: user.id } });
     if (!cart) throw new NotFoundException('Cart not found');
@@ -148,6 +158,11 @@ export class CartService {
     return this.getCart(user);
   }
 
+  /**
+   * [PRESENTATION] SLIDE 9: CART SERVICE - REMOVE ITEM
+   * Menghapus baris data permanen dari database registry.
+   * Logic: DELETE FROM cart_items WHERE id = ?
+   */
   async removeFromCart(dto: RemoveFromCartDto, user: AuthenticatedUser) {
     const cart = await this.registryPrisma.cart.findUnique({ where: { userId: user.id } });
     if (!cart) throw new NotFoundException('Cart not found');

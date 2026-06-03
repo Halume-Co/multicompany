@@ -40,6 +40,11 @@ export class ProductService {
     };
   }
 
+  /**
+   * [PRESENTATION] SLIDE 12: SUPPLY SERVICE - TAMBAH PRODUK
+   * Memungkinkan brand (Silo) meng-input produk baru ke katalog mandiri mereka.
+   * Logic: INSERT INTO products (...) VALUES (...) di isolated database.
+   */
   async create(dto: CreateProductDto, user: AuthenticatedUser) {
     const companyId = user.companyId!;
 
@@ -84,6 +89,11 @@ export class ProductService {
     return this.registryPrisma.category.findMany({ orderBy: { name: 'asc' } });
   }
 
+  /**
+   * [PRESENTATION] SLIDE 7: DISCOVERY SERVICE - PENCARIAN BARANG
+   * Melakukan pencarian cross-company real-time melalui Registry Index.
+   * Logic: SELECT p.*, c.name FROM products p JOIN companies c ... WHERE p.name LIKE ?
+   */
   async findAll(query: QueryProductDto) {
     if (query.companyId) {
       const tenantPrisma = await this.tenantManager.getTenantClient(query.companyId);

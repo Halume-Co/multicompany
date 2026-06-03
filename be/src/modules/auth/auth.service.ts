@@ -45,6 +45,8 @@ export class AuthService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  // [PRESENTATION] SLIDE 5: AUTH SERVICE - REGISTRATION
+  // Mendefinisikan role pengguna (Buyer/Seller) dan mengenkripsi password
   async register(
     dto: RegisterDto,
     req: AuthenticatedRequest,
@@ -85,6 +87,8 @@ export class AuthService {
     return { user: this.serializeUser(updated) };
   }
 
+  // [PRESENTATION] SLIDE 6: AUTH SERVICE - LOGIN
+  // Mengautentikasi kredensial dan menghasilkan session token baru
   async login(
     dto: LoginDto,
     req: AuthenticatedRequest,

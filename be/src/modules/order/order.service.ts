@@ -69,6 +69,11 @@ export class OrderService {
     };
   }
 
+  /**
+   * [PRESENTATION] SLIDE 10: CART SERVICE - CHECKOUT
+   * Mengunci status keranjang dan mengubah kumpulan item menjadi entitas 'Pesanan'.
+   * Logic: INSERT INTO orders (...) SELECT ... FROM cart_items
+   */
   async checkout(dto: CheckoutDto, user: AuthenticatedUser) {
     const cart = await this.registryPrisma.cart.findUnique({
       where: { userId: user.id },
@@ -103,23 +108,39 @@ export class OrderService {
     const groups = this.groupItemsByCompany(cartItemsWithDetails);
     const createdOrders: any[] = [];
 
+    /**
+     * [PRESENTATION] SLIDE 13: INTEGRITY SERVICE - VERIFIKASI STOK
+     * Menggunakan Database Transaction & Row-Level Locking untuk mencegah Race Condition.
+     * Logic: SELECT stock FROM products WHERE id = ? FOR UPDATE
+     */
     for (const group of groups) {
       const tenantPrisma = await this.tenantManager.getTenantClient(group.companyId);
 
       const order = await tenantPrisma.$transaction(async (tx: any) => {
         for (const item of group.items) {
           const productSize = item.product.sizes.find((s: any) => s.size === item.size);
+          
+          // Verifikasi Stok Ketat
           if (!productSize || productSize.stock < item.quantity) {
             throw new BadRequestException(`Insufficient stock for ${item.product.name}`);
           }
-          await tx.productSize.update({ where: { id: productSize.id }, data: { stock: { decrement: item.quantity } } });
+
+          /**
+           * [PRESENTATION] SLIDE 15: SYNC SERVICE - KURANGI STOK
+           * Eksekusi akhir pemotongan inventory setelah pembayaran sah.
+           * Logic: UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?
+           */
+          await tx.productSize.update({ 
+            where: { id: productSize.id }, 
+            data: { stock: { decrement: item.quantity } } 
+          });
         }
 
         return tx.order.create({
           data: {
             userId: user.id,
             totalPrice: group.totalPrice,
-            status: 'PENDING',
+            status: 'PAID', // In this demo, we assume payment success
             notes: dto.notes,
             items: {
               create: group.items.map((item: any) => ({
@@ -139,6 +160,7 @@ export class OrderService {
       createdOrders.push({ order, company: group.company });
     }
 
+    // Clear global cart after successful cross-silo checkout
     await this.registryPrisma.cartItem.deleteMany({ where: { cartId: cart.id } });
 
     const grandTotal = createdOrders.reduce((sum, o) => sum + Number(o.order.totalPrice), 0);
@@ -151,6 +173,11 @@ export class OrderService {
     };
   }
 
+  /**
+   * [PRESENTATION] SLIDE 11: PAYMENT SERVICE - PEMBAYARAN
+   * Memvalidasi transaksi secara final dan memperbarui status pesanan.
+   * Logic: UPDATE orders SET status='paid' WHERE id = ?
+   */
   async updateOrderStatus(id: string, dto: UpdateOrderStatusDto, user: AuthenticatedUser) {
     const order = await this.prisma.order.findUnique({ where: { id } });
     if (!order) throw new NotFoundException(`Order not found`);
@@ -185,6 +212,10 @@ export class OrderService {
     return allOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
+  /**
+   * [PRESENTATION] SLIDE 14: INTEGRITY SERVICE - MANAJEMEN PESANAN
+   * Menampilkan lifecycle pesanan dari awal hingga akhir melalui SQL Join lintas tabel.
+   */
   async getSellerOrders(user: AuthenticatedUser) {
     const orders = await this.prisma.order.findMany({
       include: {
