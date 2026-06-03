@@ -9,7 +9,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL_PUMA")
+  url      = env("DATABASE_PUMA")
 }
 
 // ---------------------------------------------------------------------------

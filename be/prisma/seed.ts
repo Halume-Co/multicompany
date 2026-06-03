@@ -6,83 +6,154 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { hashPassword, normalizeEmail } from '../src/modules/auth/auth.utils';
 
-const adapter = new PrismaPg({
-  connectionString: process.env.DATABASE_URL!,
-});
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const prisma = new PrismaClient({ adapter } as any);
-
-async function createTenantSchema(companyId: string) {
-    const schemaName = `tenant_${companyId.replace(/-/g, '_')}`;
-    console.log(`🔨 Initializing silo for ${companyId} (Schema: ${schemaName})...`);
-    
-    await prisma.$executeRawUnsafe(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
-    
-    // Create tables in the tenant schema
-    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${schemaName}"."categories" (id UUID PRIMARY KEY, name TEXT UNIQUE, slug TEXT UNIQUE, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
-    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${schemaName}"."products" (id UUID PRIMARY KEY, name TEXT, description TEXT, price DECIMAL(12,2), "imageUrl" TEXT, "isActive" BOOLEAN DEFAULT TRUE, "categoryId" UUID REFERENCES "${schemaName}"."categories"(id), "companyId" UUID, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
-    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${schemaName}"."product_sizes" (id UUID PRIMARY KEY, size INT, stock INT DEFAULT 0, "productId" UUID REFERENCES "${schemaName}"."products"(id) ON DELETE CASCADE, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW(), UNIQUE("productId", size))`);
-    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${schemaName}"."orders" (id UUID PRIMARY KEY, "totalPrice" DECIMAL(12,2), status TEXT, notes TEXT, "userId" UUID, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
-    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${schemaName}"."order_items" (id UUID PRIMARY KEY, size INT, quantity INT, "unitPrice" DECIMAL(12,2), "orderId" UUID REFERENCES "${schemaName}"."orders"(id) ON DELETE CASCADE, "productId" UUID REFERENCES "${schemaName}"."products"(id), "createdAt" TIMESTAMP DEFAULT NOW())`);
-
-    return schemaName;
+// Helper to create a prisma client for a specific URL using the PG Adapter
+function createClientForUrl(url: string) {
+    const adapter = new PrismaPg({ connectionString: url });
+    return new PrismaClient({ adapter } as any);
 }
 
 async function main() {
-  console.log('🚀 Starting Federated Silo Seeding...');
+  console.log('🚀 Starting Multi-Database Federated Seeding (Adapter Mode)...');
 
-  // 0. Cleanup
-  console.log('🧹 Cleaning up old data...');
-  await prisma.cartItem.deleteMany();
-  await prisma.cart.deleteMany();
-  await prisma.session.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.company.deleteMany();
+  const registryPrisma = createClientForUrl(process.env.DATABASE_URL!);
 
-  // 1. Setup Main Companies (Registry)
+  // 0. Cleanup Registry
+  console.log('🧹 Cleaning up Registry (Main DB)...');
+  try {
+    // Order matters for FK constraints
+    await registryPrisma.$executeRawUnsafe(`TRUNCATE TABLE "order_items", "orders", "cart_items", "carts", "sessions", "product_sizes", "products", "categories", "users", "companies" CASCADE`);
+  } catch (e) {
+    console.warn('⚠️ Standard truncate failed, trying individual deletes...');
+    await registryPrisma.cartItem.deleteMany().catch(() => {});
+    await registryPrisma.cart.deleteMany().catch(() => {});
+    await registryPrisma.session.deleteMany().catch(() => {});
+    await registryPrisma.user.deleteMany().catch(() => {});
+    await registryPrisma.product.deleteMany().catch(() => {});
+    await registryPrisma.category.deleteMany().catch(() => {});
+    await registryPrisma.company.deleteMany().catch(() => {});
+  }
+
+  // 1. Companies Configuration
   const companies = [
-    { id: '11111111-1111-4111-8111-111111111111', name: 'Nike', email: 'seller@nike.example.com', logo: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=100&h=100&q=80' },
-    { id: '22222222-2222-4222-8222-222222222222', name: 'Adidas', email: 'seller@adidas.example.com', logo: 'https://images.unsplash.com/photo-1518002171953-a080ee817e1f?auto=format&fit=crop&w=100&h=100&q=80' },
-    { id: 'c35628e2-ac6f-4f8a-b866-bc293550d591', name: 'Puma', email: 'seller@puma.example.com', logo: 'https://images.unsplash.com/photo-1539185441755-769473a23570?auto=format&fit=crop&w=100&h=100&q=80' },
+    { 
+        id: '11111111-1111-4111-8111-111111111111', 
+        name: 'Nike', 
+        email: 'seller@nike.example.com', 
+        logo: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=100&h=100&q=80',
+        url: process.env.DATABASE_NIKE 
+    },
+    { 
+        id: '22222222-2222-4222-8222-222222222222', 
+        name: 'Adidas', 
+        email: 'seller@adidas.example.com', 
+        logo: 'https://images.unsplash.com/photo-1518002171953-a080ee817e1f?auto=format&fit=crop&w=100&h=100&q=80',
+        url: process.env.DATABASE_ADIDAS 
+    },
+    { 
+        id: 'c35628e2-ac6f-4f8a-b866-bc293550d591', 
+        name: 'Puma', 
+        email: 'seller@puma.example.com', 
+        logo: 'https://images.unsplash.com/photo-1539185441755-769473a23570?auto=format&fit=crop&w=100&h=100&q=80',
+        url: process.env.DATABASE_PUMA 
+    },
   ];
 
-  const catsToSeed = [
-    { id: randomUUID(), name: 'Running', slug: 'running' },
-    { id: randomUUID(), name: 'Casual', slug: 'casual' },
-    { id: randomUUID(), name: 'Basketball', slug: 'basketball' },
-  ];
+  // 2. Global Categories (In Registry for Fast Filter)
+  console.log('📂 Seeding Global Categories...');
+  const runningCat = await registryPrisma.category.create({ data: { name: 'Running', slug: 'running' } });
+  const casualCat = await registryPrisma.category.create({ data: { name: 'Casual', slug: 'casual' } });
+  const bballCat = await registryPrisma.category.create({ data: { name: 'Basketball', slug: 'basketball' } });
 
+  // 3. Seed Each Silo
   for (const c of companies) {
-    await prisma.company.upsert({
-      where: { id: c.id },
-      update: { dbSchema: `tenant_${c.id.replace(/-/g, '_')}` },
-      create: { 
-        id: c.id, 
-        name: c.name, 
-        email: normalizeEmail(c.email), 
-        logoUrl: c.logo, 
-        dbSchema: `tenant_${c.id.replace(/-/g, '_')}` 
+    if (!c.url) {
+        console.warn(`⚠️ Skipping ${c.name} - No DATABASE_URL found in .env`);
+        continue;
+    }
+
+    console.log(`\n🏢 Seeding Silo for: ${c.name}...`);
+    
+    // Create company in Registry
+    await registryPrisma.company.create({
+      data: {
+        id: c.id,
+        name: c.name,
+        email: normalizeEmail(c.email),
+        logoUrl: c.logo,
+        isActive: true,
       },
     });
 
-    // Initialize the isolated silo for this company
-    const schema = await createTenantSchema(c.id);
+    const siloPrisma = createClientForUrl(c.url);
 
-    // Seed data into the SILO (isolated)
-    for (const cat of catsToSeed) {
-        await prisma.$executeRawUnsafe(`INSERT INTO "${schema}"."categories" (id, name, slug) VALUES ('${cat.id}', '${cat.name}', '${cat.slug}') ON CONFLICT DO NOTHING`);
+    try {
+        // Ensure tables exist in Silo (Using raw SQL for robustness)
+        await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "categories" (id UUID PRIMARY KEY, name TEXT UNIQUE, slug TEXT UNIQUE, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
+        await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "products" (id UUID PRIMARY KEY, name TEXT, description TEXT, price DECIMAL(12,2), "imageUrl" TEXT, "isActive" BOOLEAN DEFAULT TRUE, "categoryId" UUID REFERENCES "categories"(id), "companyId" UUID, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
+        await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "product_sizes" (id UUID PRIMARY KEY, size INT, stock INT DEFAULT 0, "productId" UUID REFERENCES "products"(id) ON DELETE CASCADE, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW(), UNIQUE("productId", size))`);
+        await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "orders" (id UUID PRIMARY KEY, "totalPrice" DECIMAL(12,2), status TEXT, notes TEXT, "userId" UUID, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
+        await siloPrisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "order_items" (id UUID PRIMARY KEY, size INT, quantity INT, "unitPrice" DECIMAL(12,2), "orderId" UUID REFERENCES "orders"(id) ON DELETE CASCADE, "productId" UUID REFERENCES "products"(id), "createdAt" TIMESTAMP DEFAULT NOW())`);
+
+        // Seed Silo Category
+        const siloRunning = await siloPrisma.category.upsert({
+            where: { slug: 'running' },
+            update: {},
+            create: { id: runningCat.id, name: 'Running', slug: 'running' }
+        });
+
+        // Seed Silo Products
+        const products = [
+            { name: `${c.name} Alpha`, price: 1200000, img: c.logo },
+            { name: `${c.name} Beta`, price: 1500000, img: c.logo },
+            { name: `${c.name} Gamma`, price: 900000, img: c.logo },
+        ];
+
+        for (const p of products) {
+            const pId = randomUUID();
+            // 1. Create in Silo (Truth)
+            const siloProduct = await siloPrisma.product.create({
+                data: {
+                    id: pId,
+                    name: p.name,
+                    description: `High performance ${p.name} from ${c.name} isolated database.`,
+                    price: p.price,
+                    imageUrl: p.img,
+                    categoryId: siloRunning.id,
+                    companyId: c.id,
+                    sizes: {
+                        create: [
+                            { size: 40, stock: 100 },
+                            { size: 42, stock: 100 },
+                        ]
+                    }
+                }
+            });
+
+            // 2. Create in Registry (Index)
+            await registryPrisma.product.create({
+                data: {
+                    id: siloProduct.id,
+                    name: siloProduct.name,
+                    price: siloProduct.price,
+                    imageUrl: siloProduct.imageUrl,
+                    categoryId: runningCat.id,
+                    companyId: c.id,
+                }
+            });
+        }
+        console.log(`✅ ${c.name} silo seeded successfully.`);
+    } catch (err) {
+        console.error(`❌ Failed to seed silo for ${c.name}:`, err.message);
+    } finally {
+        await siloPrisma.$disconnect();
     }
-
-    // Seed some products into this silo
-    const pId = randomUUID();
-    await prisma.$executeRawUnsafe(`INSERT INTO "${schema}"."products" (id, name, price, "categoryId", "companyId") VALUES ('${pId}', '${c.name} Performance Shoe', 1200000, '${catsToSeed[0].id}', '${c.id}') ON CONFLICT DO NOTHING`);
-    await prisma.$executeRawUnsafe(`INSERT INTO "${schema}"."product_sizes" (id, size, stock, "productId") VALUES ('${randomUUID()}', 42, 50, '${pId}') ON CONFLICT DO NOTHING`);
   }
 
-  console.log('✅ Federated Silo Seeding completed!');
+  console.log('\n✨ ALL DATABASES SYNCHRONIZED AND SEEDED! ✨');
+  await registryPrisma.$disconnect();
 }
 
-main()
-  .catch((e) => { console.error('Seed failed:', e); process.exit(1); })
-  .finally(async () => { await prisma.$disconnect(); });
+main().catch((e) => {
+  console.error('Fatal Seed Error:', e);
+  process.exit(1);
+});
