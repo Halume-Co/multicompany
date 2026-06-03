@@ -54,7 +54,7 @@ export function Header() {
               <span className="text-primary-foreground font-bold text-lg">S</span>
             </div>
             <span className="font-bold text-lg hidden lg:inline">
-              Shoe Marketplace
+              Halume Marketshoes
             </span>
           </Link>
 
