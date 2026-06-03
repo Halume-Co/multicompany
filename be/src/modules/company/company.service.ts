@@ -26,7 +26,6 @@ export class CompanyService {
       );
     }
 
-    // Check name uniqueness
     const existingByName = await this.prisma.company.findUnique({
       where: { name: trimmedName },
     });
@@ -36,7 +35,6 @@ export class CompanyService {
       );
     }
 
-    // Check email uniqueness
     const existingByEmail = await this.prisma.company.findUnique({
       where: { email: normalizedEmail },
     });
@@ -48,16 +46,17 @@ export class CompanyService {
 
     const company = await this.prisma.company.create({
       data: {
+        id: crypto.randomUUID(), // Explicitly set ID for schema name consistency
         name: trimmedName,
         description: dto.description?.trim() || null,
         logoUrl: dto.logoUrl?.trim() || null,
         email: normalizedEmail,
         phone: dto.phone?.trim() || null,
         address: dto.address?.trim() || null,
+        dbSchema: `tenant_${crypto.randomUUID().replace(/-/g, '_')}`,
       },
     });
 
-    // Associate seller with the newly created company
     await this.prisma.user.update({
       where: { id: user.id },
       data: { companyId: company.id },
@@ -66,9 +65,6 @@ export class CompanyService {
     return company;
   }
 
-  /**
-   * Update the company profile for the authenticated seller.
-   */
   async update(dto: UpdateCompanyDto, user: AuthenticatedUser) {
     if (!user.companyId) {
       throw new NotFoundException('No company associated with your account');
@@ -81,33 +77,11 @@ export class CompanyService {
       throw new NotFoundException('Company not found');
     }
 
-    if (dto.name) {
-      const trimmedName = dto.name.trim();
-      const existingByName = await this.prisma.company.findFirst({
-        where: { name: trimmedName, id: { not: user.companyId } },
-      });
-      if (existingByName) {
-        throw new ConflictException(`Company name "${trimmedName}" is taken`);
-      }
-      dto.name = trimmedName;
-    }
-
-    if (dto.email) {
-      const normalizedEmail = normalizeEmail(dto.email);
-      const existingByEmail = await this.prisma.company.findFirst({
-        where: { email: normalizedEmail, id: { not: user.companyId } },
-      });
-      if (existingByEmail) {
-        throw new ConflictException(`Email "${normalizedEmail}" is already used by another company`);
-      }
-      dto.email = normalizedEmail;
-    }
-
     return this.prisma.company.update({
       where: { id: user.companyId },
       data: {
-        ...(dto.name && { name: dto.name }),
-        ...(dto.email && { email: dto.email }),
+        ...(dto.name && { name: dto.name.trim() }),
+        ...(dto.email && { email: normalizeEmail(dto.email) }),
         ...(dto.description !== undefined && { description: dto.description?.trim() || null }),
         ...(dto.logoUrl !== undefined && { logoUrl: dto.logoUrl?.trim() || null }),
         ...(dto.phone !== undefined && { phone: dto.phone?.trim() || null }),
@@ -116,35 +90,32 @@ export class CompanyService {
     });
   }
 
-  /**
-   * Get the company profile for the authenticated seller.
-   */
   async getMyCompany(user: AuthenticatedUser) {
     if (!user.companyId) {
-      throw new NotFoundException(
-        'You are not associated with any company. Register one first.',
-      );
+      throw new NotFoundException('Not associated with a company.');
     }
 
     const company = await this.prisma.company.findUnique({
       where: { id: user.companyId },
       include: {
         _count: {
-          select: { products: true, orders: true, users: true },
+          select: { users: true },
         },
       },
     });
 
-    if (!company) {
-      throw new NotFoundException('Company not found');
-    }
+    if (!company) throw new NotFoundException('Company not found');
 
-    return company;
+    return {
+        ...company,
+        _count: {
+            ...company._count,
+            products: 0, // In Silo architecture, we fetch this from the tenant schema
+            orders: 0,
+        }
+    };
   }
 
-  /**
-   * List all active companies (public endpoint).
-   */
   async findAll() {
     return this.prisma.company.findMany({
       where: { isActive: true },
@@ -153,15 +124,11 @@ export class CompanyService {
         name: true,
         description: true,
         logoUrl: true,
-        _count: { select: { products: true } },
       },
       orderBy: { name: 'asc' },
     });
   }
 
-  /**
-   * Get a specific company by id.
-   */
   async findOne(id: string) {
     const company = await this.prisma.company.findUnique({
       where: { id },
@@ -172,14 +139,14 @@ export class CompanyService {
         logoUrl: true,
         phone: true,
         address: true,
-        _count: { select: { products: true } },
       },
     });
 
-    if (!company) {
-      throw new NotFoundException(`Company with id "${id}" not found`);
-    }
+    if (!company) throw new NotFoundException(`Company not found`);
 
-    return company;
+    return {
+        ...company,
+        _count: { products: 0 } // Fetched from tenant schema in storefront page
+    };
   }
 }

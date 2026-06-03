@@ -11,6 +11,7 @@ import { CompanyModule } from './modules/company/company.module';
 import { ProductModule } from './modules/product/product.module';
 import { CartModule } from './modules/cart/cart.module';
 import { OrderModule } from './modules/order/order.module';
+import { TenantModule } from './modules/tenant/tenant.module';
 import { SessionAuthMiddleware } from './common/middleware/session-auth.middleware';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -25,6 +26,9 @@ import { AppService } from './app.service';
 
     // Prisma (global, provides PrismaService everywhere)
     PrismaModule,
+
+    // Multi-tenant Dynamic DB Router
+    TenantModule,
 
     // Feature modules
     AuthModule,

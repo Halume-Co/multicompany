@@ -13,94 +13,66 @@ const adapter = new PrismaPg({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const prisma = new PrismaClient({ adapter } as any);
 
-async function resolveSeedPasswordHash(envName: string): Promise<{
-  hash: string;
-  hasKnownPassword: boolean;
-}> {
-  const password = process.env[envName]?.trim();
-  if (password) {
-    return { hash: await hashPassword(password), hasKnownPassword: true };
-  }
-  return { hash: await hashPassword(randomUUID()), hasKnownPassword: false };
+async function createTenantSchema(companyId: string) {
+    const schemaName = `tenant_${companyId.replace(/-/g, '_')}`;
+    console.log(`🔨 Initializing silo for ${companyId} (Schema: ${schemaName})...`);
+    
+    await prisma.$executeRawUnsafe(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
+    
+    // Create tables in the tenant schema
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${schemaName}"."categories" (id UUID PRIMARY KEY, name TEXT UNIQUE, slug TEXT UNIQUE, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${schemaName}"."products" (id UUID PRIMARY KEY, name TEXT, description TEXT, price DECIMAL(12,2), "imageUrl" TEXT, "isActive" BOOLEAN DEFAULT TRUE, "categoryId" UUID REFERENCES "${schemaName}"."categories"(id), "companyId" UUID, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${schemaName}"."product_sizes" (id UUID PRIMARY KEY, size INT, stock INT DEFAULT 0, "productId" UUID REFERENCES "${schemaName}"."products"(id) ON DELETE CASCADE, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW(), UNIQUE("productId", size))`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${schemaName}"."orders" (id UUID PRIMARY KEY, "totalPrice" DECIMAL(12,2), status TEXT, notes TEXT, "userId" UUID, "createdAt" TIMESTAMP DEFAULT NOW(), "updatedAt" TIMESTAMP DEFAULT NOW())`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${schemaName}"."order_items" (id UUID PRIMARY KEY, size INT, quantity INT, "unitPrice" DECIMAL(12,2), "orderId" UUID REFERENCES "${schemaName}"."orders"(id) ON DELETE CASCADE, "productId" UUID REFERENCES "${schemaName}"."products"(id), "createdAt" TIMESTAMP DEFAULT NOW())`);
+
+    return schemaName;
 }
 
 async function main() {
-  console.log('🚀 Starting Advanced Seeding...');
+  console.log('🚀 Starting Federated Silo Seeding...');
 
-  // 1. Categories
-  const categories = {
-    running: await prisma.category.upsert({ where: { slug: 'running' }, update: {}, create: { name: 'Running', slug: 'running' } }),
-    casual: await prisma.category.upsert({ where: { slug: 'casual' }, update: {}, create: { name: 'Casual', slug: 'casual' } }),
-    basketball: await prisma.category.upsert({ where: { slug: 'basketball' }, update: {}, create: { name: 'Basketball', slug: 'basketball' } }),
-    formal: await prisma.category.upsert({ where: { slug: 'formal' }, update: {}, create: { name: 'Formal', slug: 'formal' } }),
-  };
-
-  // 2. Companies
-  const nike = await prisma.company.upsert({
-    where: { email: normalizeEmail('seller@nike.example.com') },
-    update: { logoUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=100&h=100&q=80' },
-    create: { name: 'Nike', description: 'Just Do It', email: normalizeEmail('seller@nike.example.com'), phone: '+1-800-006-4532', address: 'Beaverton, OR', logoUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=100&h=100&q=80' },
-  });
-
-  const adidas = await prisma.company.upsert({
-    where: { email: normalizeEmail('seller@adidas.example.com') },
-    update: { logoUrl: 'https://images.unsplash.com/photo-1518002171953-a080ee817e1f?auto=format&fit=crop&w=100&h=100&q=80' },
-    create: { name: 'Adidas', description: 'Impossible Is Nothing', email: normalizeEmail('seller@adidas.example.com'), phone: '+49-9132-84-0', address: 'Herzogenaurach, Germany', logoUrl: 'https://images.unsplash.com/photo-1518002171953-a080ee817e1f?auto=format&fit=crop&w=100&h=100&q=80' },
-  });
-
-  const puma = await prisma.company.upsert({
-    where: { email: normalizeEmail('seller@puma.example.com') },
-    update: { logoUrl: 'https://images.unsplash.com/photo-1539185441755-769473a23570?auto=format&fit=crop&w=100&h=100&q=80' },
-    create: { name: 'Puma', description: 'Forever Faster', email: normalizeEmail('seller@puma.example.com'), phone: '+49-9132-81-0', address: 'Herzogenaurach, Germany', logoUrl: 'https://images.unsplash.com/photo-1539185441755-769473a23570?auto=format&fit=crop&w=100&h=100&q=80' },
-  });
-
-  // 3. Products Data
-  const productsToSeed = [
-    // NIKE
-    { name: 'Nike Air Max 270', price: 1500000, cat: 'running', comp: nike, img: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=600&q=80' },
-    { name: 'Air Jordan 1 Retro', price: 2200000, cat: 'basketball', comp: nike, img: 'https://images.unsplash.com/photo-1597043530274-0570b8655099?auto=format&fit=crop&w=600&q=80' },
-    { name: 'Nike Zoom Fly 5', price: 1750000, cat: 'running', comp: nike, img: 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?auto=format&fit=crop&w=600&q=80' },
-    { name: 'Nike Court Vision', price: 850000, cat: 'casual', comp: nike, img: 'https://images.unsplash.com/photo-1605348532760-6753d2c43329?auto=format&fit=crop&w=600&q=80' },
-    
-    // ADIDAS
-    { name: 'Adidas Ultraboost 22', price: 1800000, cat: 'running', comp: adidas, img: 'https://images.unsplash.com/photo-1587563871167-1ee9c731aefb?auto=format&fit=crop&w=600&q=80' },
-    { name: 'Adidas Gazelle', price: 900000, cat: 'casual', comp: adidas, img: 'https://images.unsplash.com/photo-1518002171953-a080ee817e1f?auto=format&fit=crop&w=600&q=80' },
-    { name: 'Adidas Forum Low', price: 1200000, cat: 'casual', comp: adidas, img: 'https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=600&q=80' },
-    { name: 'Adidas Predator', price: 2100000, cat: 'basketball', comp: adidas, img: 'https://images.unsplash.com/photo-1511556532299-8f662fc26c06?auto=format&fit=crop&w=600&q=80' },
-
-    // PUMA
-    { name: 'Puma RS-X', price: 1100000, cat: 'casual', comp: puma, img: 'https://images.unsplash.com/photo-1539185441755-769473a23570?auto=format&fit=crop&w=600&q=80' },
-    { name: 'Puma Velocity Nitro', price: 1400000, cat: 'running', comp: puma, img: 'https://images.unsplash.com/photo-1608231387042-66d1773070a5?auto=format&fit=crop&w=600&q=80' },
-    { name: 'Puma Cali Star', price: 950000, cat: 'casual', comp: puma, img: 'https://images.unsplash.com/photo-1551107696-a4b0c5a0d9a2?auto=format&fit=crop&w=600&q=80' },
-    { name: 'Puma Suede Classic', price: 750000, cat: 'casual', comp: puma, img: 'https://images.unsplash.com/photo-1512374382149-433261027315?auto=format&fit=crop&w=600&q=80' },
+  // 1. Setup Main Companies (Registry)
+  const companies = [
+    { id: '11111111-1111-4111-8111-111111111111', name: 'Nike', email: 'seller@nike.example.com', logo: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=100&h=100&q=80' },
+    { id: '22222222-2222-4222-8222-222222222222', name: 'Adidas', email: 'seller@adidas.example.com', logo: 'https://images.unsplash.com/photo-1518002171953-a080ee817e1f?auto=format&fit=crop&w=100&h=100&q=80' },
+    { id: 'c35628e2-ac6f-4f8a-b866-bc293550d591', name: 'Puma', email: 'seller@puma.example.com', logo: 'https://images.unsplash.com/photo-1539185441755-769473a23570?auto=format&fit=crop&w=100&h=100&q=80' },
   ];
 
-  for (const p of productsToSeed) {
-    const slug = p.name.toLowerCase().replace(/ /g, '-');
-    await prisma.product.upsert({
-      where: { id: randomUUID() }, // This is a bit hacky for upsert, but since we are seeding many, it's better to just create or find by name if we had a slug
-      update: {},
-      create: {
-        name: p.name,
-        description: `Premium ${p.name} from ${p.comp.name}.`,
-        price: p.price,
-        imageUrl: p.img,
-        categoryId: categories[p.cat as keyof typeof categories].id,
-        companyId: p.comp.id,
-        sizes: {
-          create: [
-            { size: 38, stock: Math.floor(Math.random() * 20) + 5 },
-            { size: 39, stock: Math.floor(Math.random() * 20) + 5 },
-            { size: 40, stock: Math.floor(Math.random() * 20) + 5 },
-            { size: 41, stock: Math.floor(Math.random() * 20) + 5 },
-            { size: 42, stock: Math.floor(Math.random() * 20) + 5 },
-          ],
-        },
+  const catsToSeed = [
+    { id: randomUUID(), name: 'Running', slug: 'running' },
+    { id: randomUUID(), name: 'Casual', slug: 'casual' },
+    { id: randomUUID(), name: 'Basketball', slug: 'basketball' },
+  ];
+
+  for (const c of companies) {
+    await prisma.company.upsert({
+      where: { id: c.id },
+      update: { dbSchema: `tenant_${c.id.replace(/-/g, '_')}` },
+      create: { 
+        id: c.id, 
+        name: c.name, 
+        email: normalizeEmail(c.email), 
+        logoUrl: c.logo, 
+        dbSchema: `tenant_${c.id.replace(/-/g, '_')}` 
       },
     });
+
+    // Initialize the isolated silo for this company
+    const schema = await createTenantSchema(c.id);
+
+    // Seed data into the SILO (isolated)
+    for (const cat of catsToSeed) {
+        await prisma.$executeRawUnsafe(`INSERT INTO "${schema}"."categories" (id, name, slug) VALUES ('${cat.id}', '${cat.name}', '${cat.slug}') ON CONFLICT DO NOTHING`);
+    }
+
+    // Seed some products into this silo
+    const pId = randomUUID();
+    await prisma.$executeRawUnsafe(`INSERT INTO "${schema}"."products" (id, name, price, "categoryId", "companyId") VALUES ('${pId}', '${c.name} Performance Shoe', 1200000, '${catsToSeed[0].id}', '${c.id}') ON CONFLICT DO NOTHING`);
+    await prisma.$executeRawUnsafe(`INSERT INTO "${schema}"."product_sizes" (id, size, stock, "productId") VALUES ('${randomUUID()}', 42, 50, '${pId}') ON CONFLICT DO NOTHING`);
   }
 
-  console.log('✅ Advanced Seeding completed successfully!');
+  console.log('✅ Federated Silo Seeding completed!');
 }
 
 main()

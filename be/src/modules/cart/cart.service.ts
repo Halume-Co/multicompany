@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,12 +9,17 @@ import { AddToCartDto } from './dto/add-to-cart.dto';
 import { RemoveFromCartDto } from './dto/remove-from-cart.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+import { TenantConnectionService } from '../tenant/tenant.module';
 
 @Injectable()
 export class CartService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject('TENANT_PRISMA') private readonly prisma: any,
+    private readonly registryPrisma: PrismaService,
+    private readonly tenantManager: TenantConnectionService,
+  ) {}
 
-  private serializeProduct(product: any) {
+  private serializeProduct(product: any, company?: any) {
     return {
       id: product.id,
       name: product.name,
@@ -21,274 +27,139 @@ export class CartService {
       price: Number(product.price),
       images: product.imageUrl ? [product.imageUrl] : [],
       sizes: product.sizes
-        .sort((a, b) => a.size - b.size)
-        .map((s: any) => ({ size: String(s.size), stock: s.stock })),
-      sellerId: product.companyId,
-      sellerName: product.company.name,
-      category: product.category.name,
+        ? product.sizes.sort((a, b) => a.size - b.size).map((s: any) => ({ size: String(s.size), stock: s.stock }))
+        : [],
+      sellerId: company?.id || product.companyId,
+      sellerName: company?.name || "Official Store",
+      category: product.category?.name || "Uncategorized",
       rating: 0,
       reviewCount: 0,
       createdAt: product.createdAt.toISOString(),
     };
   }
 
-  private serializeCart(cart: any) {
-    const items = cart.items.map((item: any) => ({
-      productId: item.productId,
-      size: String(item.size),
-      quantity: item.quantity,
-      price: Number(item.product.price),
-      product: this.serializeProduct(item.product),
-    }));
+  async getCart(user: AuthenticatedUser) {
+    const cart = await this.registryPrisma.cart.findUnique({
+      where: { userId: user.id },
+      include: { items: true },
+    });
 
-    const subtotal = items.reduce(
-      (sum: number, item: any) => sum + item.price * item.quantity,
-      0,
-    );
+    if (!cart || cart.items.length === 0) {
+      return { items: [], subtotal: 0, tax: 0, total: 0 };
+    }
+
+    const companies = await this.registryPrisma.company.findMany();
+    const itemsWithDetails: any[] = [];
+
+    for (const item of cart.items) {
+        let productDetails: any = null;
+        let companyInfo: any = null;
+
+        for (const company of companies) {
+            const tenantPrisma = this.tenantManager.getTenantClient(company.id);
+            const product = await tenantPrisma.product.findUnique({
+                where: { id: item.productId },
+                include: { category: true, sizes: true }
+            });
+            if (product) {
+                productDetails = product;
+                companyInfo = company;
+                break;
+            }
+        }
+
+        if (productDetails) {
+            itemsWithDetails.push({
+                productId: item.productId,
+                size: String(item.size),
+                quantity: item.quantity,
+                price: Number(productDetails.price),
+                product: this.serializeProduct(productDetails, companyInfo),
+            });
+        }
+    }
+
+    const subtotal = itemsWithDetails.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
     return {
-      items,
+      items: itemsWithDetails,
       subtotal: parseFloat(subtotal.toFixed(2)),
       tax: 0,
       total: parseFloat(subtotal.toFixed(2)),
     };
   }
 
-  // ---------------------------------------------------------------------------
-  //  Ensure cart exists (or create it)
-  // ---------------------------------------------------------------------------
-
-  private async getOrCreateCart(userId: string) {
-    return this.prisma.cart.upsert({
-      where: { userId },
-      update: {},
-      create: { userId },
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  //  GET /cart
-  // ---------------------------------------------------------------------------
-
-  async getCart(user: AuthenticatedUser) {
-    const cart = await this.prisma.cart.findUnique({
-      where: { userId: user.id },
-      include: {
-        items: {
-          include: {
-            product: {
-              include: {
-                company: { select: { id: true, name: true } },
-                category: { select: { id: true, name: true } },
-                sizes: true,
-              },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-        },
-      },
-    });
-
-    if (!cart) {
-      return { items: [], subtotal: 0, tax: 0, total: 0 };
-    }
-
-    return this.serializeCart(cart);
-  }
-
-  // ---------------------------------------------------------------------------
-  //  POST /cart/add
-  // ---------------------------------------------------------------------------
-
   async addToCart(dto: AddToCartDto, user: AuthenticatedUser) {
-    // 1. Validate product exists and is active
-    const product = await this.prisma.product.findUnique({
-      where: { id: dto.productId },
-      include: { sizes: true },
+    const companies = await this.registryPrisma.company.findMany();
+    let productDetails: any = null;
+
+    for (const company of companies) {
+        const tenantPrisma = this.tenantManager.getTenantClient(company.id);
+        const product = await tenantPrisma.product.findUnique({
+            where: { id: dto.productId },
+            include: { sizes: true }
+        });
+        if (product && product.isActive) {
+            productDetails = product;
+            break;
+        }
+    }
+
+    if (!productDetails) throw new NotFoundException('Product not found');
+
+    const productSize = productDetails.sizes.find((s: any) => s.size === dto.size);
+    if (!productSize || productSize.stock < dto.quantity) {
+        throw new BadRequestException('Insufficient stock');
+    }
+
+    const cart = await this.registryPrisma.cart.upsert({
+      where: { userId: user.id },
+      update: {},
+      create: { userId: user.id },
     });
 
-    if (!product || !product.isActive) {
-      throw new NotFoundException(
-        `Product with id "${dto.productId}" not found`,
-      );
-    }
-
-    // 2. Validate size exists
-    const productSize = product.sizes.find((s) => s.size === dto.size);
-    if (!productSize) {
-      throw new NotFoundException(
-        `Size ${dto.size} is not available for product "${product.name}"`,
-      );
-    }
-
-    // 3. Validate stock
-    if (productSize.stock < dto.quantity) {
-      throw new BadRequestException(
-        `Insufficient stock for size ${dto.size}. Available: ${productSize.stock}`,
-      );
-    }
-
-    // 4. Get or create cart
-    const cart = await this.getOrCreateCart(user.id);
-
-    // 5. Upsert cart item (add to existing or create new)
-    const existingItem = await this.prisma.cartItem.findUnique({
-      where: {
-        cartId_productId_size: {
-          cartId: cart.id,
-          productId: dto.productId,
-          size: dto.size,
-        },
-      },
+    const existingItem = await this.registryPrisma.cartItem.findUnique({
+      where: { cartId_productId_size: { cartId: cart.id, productId: dto.productId, size: dto.size } }
     });
 
-    let cartItem;
     if (existingItem) {
-      // Validate combined quantity doesn't exceed stock
-      const newQty = existingItem.quantity + dto.quantity;
-      if (newQty > productSize.stock) {
-        throw new BadRequestException(
-          `Total quantity (${newQty}) exceeds available stock (${productSize.stock}) for size ${dto.size}`,
-        );
-      }
-
-      cartItem = await this.prisma.cartItem.update({
+      await this.registryPrisma.cartItem.update({
         where: { id: existingItem.id },
-        data: { quantity: newQty },
-        include: { product: { include: { company: { select: { id: true, name: true } } } } },
+        data: { quantity: existingItem.quantity + dto.quantity }
       });
     } else {
-      cartItem = await this.prisma.cartItem.create({
-        data: {
-          cartId: cart.id,
-          productId: dto.productId,
-          size: dto.size,
-          quantity: dto.quantity,
-        },
-        include: { product: { include: { company: { select: { id: true, name: true } } } } },
+      await this.registryPrisma.cartItem.create({
+        data: { cartId: cart.id, productId: dto.productId, size: dto.size, quantity: dto.quantity }
       });
     }
 
-    return {
-      message: 'Item added to cart successfully',
-      cartItem,
-    };
+    return { message: 'Item added to cart' };
   }
 
-  // ---------------------------------------------------------------------------
-  //  PATCH /cart/update
-  // ---------------------------------------------------------------------------
-
   async updateQuantity(dto: UpdateCartItemDto, user: AuthenticatedUser) {
-    const product = await this.prisma.product.findUnique({
-      where: { id: dto.productId },
-      include: { sizes: true },
-    });
+    const cart = await this.registryPrisma.cart.findUnique({ where: { userId: user.id } });
+    if (!cart) throw new NotFoundException('Cart not found');
 
-    if (!product) {
-      throw new NotFoundException('Product not found');
-    }
-
-    const productSize = product.sizes.find((s) => s.size === dto.size);
-    if (!productSize) {
-      throw new NotFoundException(`Size ${dto.size} not found`);
-    }
-
-    if (productSize.stock < dto.quantity) {
-      throw new BadRequestException(
-        `Insufficient stock. Available: ${productSize.stock}`,
-      );
-    }
-
-    const cart = await this.prisma.cart.findUnique({
-      where: { userId: user.id },
-    });
-
-    if (!cart) {
-      throw new NotFoundException('Cart not found');
-    }
-
-    const cartItem = await this.prisma.cartItem.findUnique({
-      where: {
-        cartId_productId_size: {
-          cartId: cart.id,
-          productId: dto.productId,
-          size: dto.size,
-        },
-      },
-    });
-
-    if (!cartItem) {
-      throw new NotFoundException('Cart item not found');
-    }
-
-    await this.prisma.cartItem.update({
-      where: { id: cartItem.id },
-      data: { quantity: dto.quantity },
+    await this.registryPrisma.cartItem.update({
+      where: { cartId_productId_size: { cartId: cart.id, productId: dto.productId, size: dto.size } },
+      data: { quantity: dto.quantity }
     });
 
     return this.getCart(user);
   }
 
-  // ---------------------------------------------------------------------------
-  //  DELETE /cart/remove
-  // ---------------------------------------------------------------------------
-
   async removeFromCart(dto: RemoveFromCartDto, user: AuthenticatedUser) {
-    const cart = await this.prisma.cart.findUnique({
-      where: { userId: user.id },
+    const cart = await this.registryPrisma.cart.findUnique({ where: { userId: user.id } });
+    if (!cart) throw new NotFoundException('Cart not found');
+
+    await this.registryPrisma.cartItem.delete({
+      where: { cartId_productId_size: { cartId: cart.id, productId: dto.productId, size: dto.size } }
     });
 
-    if (!cart) {
-      throw new NotFoundException('Cart not found');
-    }
-
-    const cartItem = await this.prisma.cartItem.findUnique({
-      where: {
-        cartId_productId_size: {
-          cartId: cart.id,
-          productId: dto.productId,
-          size: dto.size,
-        },
-      },
-    });
-
-    if (!cartItem) {
-      throw new NotFoundException(
-        `No cart item found for product "${dto.productId}" size ${dto.size}`,
-      );
-    }
-
-    await this.prisma.cartItem.delete({ where: { id: cartItem.id } });
-
-    return { message: 'Item removed from cart successfully' };
-  }
-
-  // ---------------------------------------------------------------------------
-  //  INTERNAL: Get cart items with product info (used by checkout)
-  // ---------------------------------------------------------------------------
-
-  async getCartItemsForCheckout(userId: string) {
-    const cart = await this.prisma.cart.findUnique({
-      where: { userId },
-      include: {
-        items: {
-          include: {
-            product: {
-              include: {
-                company: true,
-                sizes: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    return cart;
+    return { message: 'Item removed' };
   }
 
   async clearCart(cartId: string) {
-    await this.prisma.cartItem.deleteMany({ where: { cartId } });
+    await this.registryPrisma.cartItem.deleteMany({ where: { cartId } });
   }
 }

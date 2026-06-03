@@ -29,7 +29,7 @@ enum OrderStatus {
 }
 
 // ---------------------------------------------------------------------------
-//  User
+//  User (Registry)
 // ---------------------------------------------------------------------------
 
 model User {
@@ -45,27 +45,26 @@ model User {
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id])
 
-  cart   Cart?
-  orders Order[]
+  cart     Cart?
   sessions Session[]
 
   @@map("users")
 }
 
 // ---------------------------------------------------------------------------
-//  Session
+//  Session (Registry)
 // ---------------------------------------------------------------------------
 
 model Session {
-  id         String   @id @default(uuid())
-  tokenHash  String   @unique
+  id         String    @id @default(uuid())
+  tokenHash  String    @unique
   expiresAt  DateTime
-  lastUsedAt DateTime @default(now())
+  lastUsedAt DateTime  @default(now())
   revokedAt  DateTime?
   ipAddress  String?
   userAgent  String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -76,7 +75,7 @@ model Session {
 }
 
 // ---------------------------------------------------------------------------
-//  Company (Tenant)
+//  Company (Registry & Tenant Router)
 // ---------------------------------------------------------------------------
 
 model Company {
@@ -88,19 +87,18 @@ model Company {
   phone       String?
   address     String?
   isActive    Boolean  @default(true)
+  dbSchema    String?  // The PostgreSQL schema name for this company (e.g. tenant_nike)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   // Relations
-  users    User[]
-  products Product[]
-  orders   Order[]
+  users User[]
 
   @@map("companies")
 }
 
 // ---------------------------------------------------------------------------
-//  Category
+//  Category (Tenant Table)
 // ---------------------------------------------------------------------------
 
 model Category {
@@ -116,7 +114,7 @@ model Category {
 }
 
 // ---------------------------------------------------------------------------
-//  Product
+//  Product (Tenant Table)
 // ---------------------------------------------------------------------------
 
 model Product {
@@ -133,8 +131,7 @@ model Product {
   categoryId String
   category   Category @relation(fields: [categoryId], references: [id])
 
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id])
+  companyId String // Useful for filtering if needed, though schema isolation handles it
 
   sizes      ProductSize[]
   cartItems  CartItem[]
@@ -144,12 +141,12 @@ model Product {
 }
 
 // ---------------------------------------------------------------------------
-//  ProductSize  (stock per size)
+//  ProductSize (Tenant Table)
 // ---------------------------------------------------------------------------
 
 model ProductSize {
   id        String   @id @default(uuid())
-  size      Int      // e.g. 38, 39, 40, 41, 42, 43, 44
+  size      Int
   stock     Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -162,7 +159,7 @@ model ProductSize {
 }
 
 // ---------------------------------------------------------------------------
-//  Cart
+//  Cart (Registry - Global across companies)
 // ---------------------------------------------------------------------------
 
 model Cart {
@@ -179,7 +176,7 @@ model Cart {
 }
 
 // ---------------------------------------------------------------------------
-//  CartItem
+//  CartItem (Registry - Global)
 // ---------------------------------------------------------------------------
 
 model CartItem {
@@ -193,6 +190,8 @@ model CartItem {
   cart   Cart   @relation(fields: [cartId], references: [id], onDelete: Cascade)
 
   productId String
+  // Relationship to Product is now logically cross-database/schema
+  // but we keep it for generating types
   product   Product @relation(fields: [productId], references: [id])
 
   @@unique([cartId, productId, size])
@@ -200,7 +199,7 @@ model CartItem {
 }
 
 // ---------------------------------------------------------------------------
-//  Order
+//  Order (Tenant Table)
 // ---------------------------------------------------------------------------
 
 model Order {
@@ -211,20 +210,15 @@ model Order {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
-  // Relations
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
-
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id])
-
+  userId String // Reference to public.User.id
+  
   items OrderItem[]
 
   @@map("orders")
 }
 
 // ---------------------------------------------------------------------------
-//  OrderItem
+//  OrderItem (Tenant Table)
 // ---------------------------------------------------------------------------
 
 model OrderItem {

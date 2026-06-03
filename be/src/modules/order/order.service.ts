@@ -1,63 +1,37 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CartItem, Company, OrderStatus, Prisma, Product, ProductSize } from '@prisma/client';
+import { Company, OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { CheckoutDto } from './dto/checkout.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
-
-type CartItemWithProduct = CartItem & {
-  product: Product & { company: Company; sizes: ProductSize[] };
-};
-
-interface CompanyOrderGroup {
-  companyId: string;
-  company: Company;
-  items: CartItemWithProduct[];
-  totalPrice: number;
-}
-
-type OrderWithCompany = Prisma.OrderGetPayload<{
-  include: {
-    company: { select: { id: true; name: true } };
-    items: {
-      include: {
-        product: { select: { id: true; name: true; imageUrl: true } };
-      };
-    };
-  };
-}>;
-
-type OrderWithUser = Prisma.OrderGetPayload<{
-  include: {
-    user: { select: { id: true; name: true; email: true } };
-    items: {
-      include: {
-        product: { select: { id: true; name: true; imageUrl: true } };
-      };
-    };
-  };
-}>;
+import { TenantConnectionService } from '../tenant/tenant.module';
 
 @Injectable()
 export class OrderService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject('TENANT_PRISMA') private readonly prisma: any,
+    private readonly registryPrisma: PrismaService,
+    private readonly tenantManager: TenantConnectionService,
+  ) {}
 
-  private serializeOrder(order: OrderWithCompany) {
+  private serializeOrder(order: any, companyInfo?: { id: string, name: string }) {
     return {
       id: order.id,
       buyerId: order.userId,
-      sellerId: order.companyId,
+      sellerId: companyInfo?.id || order.companyId,
+      sellerName: companyInfo?.name || "Official Store",
       status: order.status.toLowerCase(),
       total: Number(order.totalPrice),
       subtotal: Number(order.totalPrice),
       tax: 0,
       shippingAddress: null,
-      items: order.items.map((item) => ({
+      items: order.items.map((item: any) => ({
         productId: item.productId,
         productName: item.product.name,
         size: String(item.size),
@@ -74,17 +48,17 @@ export class OrderService {
     };
   }
 
-  private serializeSellerOrder(order: OrderWithUser) {
+  private serializeSellerOrder(order: any) {
     return {
       id: order.id,
-      buyerName: order.user.name,
-      buyerEmail: order.user.email,
+      buyerName: order.user?.name || "Unknown Buyer",
+      buyerEmail: order.user?.email || "",
       status: order.status.toLowerCase(),
       total: Number(order.totalPrice),
       date: order.createdAt instanceof Date
         ? order.createdAt.toISOString()
         : order.createdAt,
-      items: order.items.map((item) => ({
+      items: order.items.map((item: any) => ({
         productId: item.productId,
         productName: item.product.name,
         size: String(item.size),
@@ -96,88 +70,59 @@ export class OrderService {
   }
 
   async checkout(dto: CheckoutDto, user: AuthenticatedUser) {
-    const createdOrders = await this.prisma.$transaction(async (tx) => {
-      const cart = await tx.cart.findUnique({
-        where: { userId: user.id },
-        include: {
-          items: {
-            include: {
-              product: { include: { company: true, sizes: true } },
-            },
-          },
-        },
-      });
+    const cart = await this.registryPrisma.cart.findUnique({
+      where: { userId: user.id },
+      include: { items: true },
+    }) as any;
 
-      if (!cart || cart.items.length === 0) {
-        throw new BadRequestException(
-          'Your cart is empty. Add items before checking out.',
-        );
-      }
+    if (!cart || cart.items.length === 0) {
+      throw new BadRequestException('Your cart is empty.');
+    }
 
-      const cartItems = cart.items as CartItemWithProduct[];
+    const companies = await this.registryPrisma.company.findMany();
+    const cartItemsWithDetails: any[] = [];
 
-      const cartItemVersionConditions = cartItems.map((item) => ({
-        id: item.id,
-        updatedAt: item.updatedAt,
-      }));
+    for (const item of cart.items) {
+        let productDetails: any = null;
+        let companyInfo: any = null;
+        for (const company of companies) {
+            const tenantPrisma = this.tenantManager.getTenantClient(company.id);
+            const product = await tenantPrisma.product.findUnique({
+                where: { id: item.productId },
+                include: { sizes: true }
+            });
+            if (product) {
+                productDetails = { ...product, company };
+                companyInfo = company;
+                break;
+            }
+        }
+        if (productDetails) cartItemsWithDetails.push({ ...item, product: productDetails, company: companyInfo });
+    }
 
-      const claimedCartItems = await tx.cartItem.deleteMany({
-        where: { cartId: cart.id, OR: cartItemVersionConditions },
-      });
+    const groups = this.groupItemsByCompany(cartItemsWithDetails);
+    const createdOrders: any[] = [];
 
-      if (claimedCartItems.count !== cartItems.length) {
-        throw new BadRequestException(
-          'Your cart changed during checkout. Please review it and try again.',
-        );
-      }
+    for (const group of groups) {
+      const tenantPrisma = this.tenantManager.getTenantClient(group.companyId);
 
-      const groups = this.groupItemsByCompany(cartItems);
-      const orders: OrderWithCompany[] = [];
-
-      for (const group of groups) {
+      const order = await tenantPrisma.$transaction(async (tx: any) => {
         for (const item of group.items) {
-          const productSize = item.product.sizes.find(
-            (size) => size.size === item.size,
-          );
-
-          if (!item.product.isActive) {
-            throw new BadRequestException(
-              `Product "${item.product.name}" is no longer available.`,
-            );
-          }
-
+          const productSize = item.product.sizes.find((s: any) => s.size === item.size);
           if (!productSize || productSize.stock < item.quantity) {
-            throw new BadRequestException(
-              `Insufficient stock for "${item.product.name}" size ${item.size}. ` +
-                `Requested: ${item.quantity}, Available: ${productSize?.stock ?? 0}`,
-            );
+            throw new BadRequestException(`Insufficient stock for ${item.product.name}`);
           }
-
-          const stockUpdate = await tx.productSize.updateMany({
-            where: {
-              productId: item.productId,
-              size: item.size,
-              stock: { gte: item.quantity },
-            },
-            data: { stock: { decrement: item.quantity } },
-          });
-
-          if (stockUpdate.count !== 1) {
-            throw new BadRequestException(
-              `Stock changed for "${item.product.name}" size ${item.size}. Please review your cart and try again.`,
-            );
-          }
+          await tx.productSize.update({ where: { id: productSize.id }, data: { stock: { decrement: item.quantity } } });
         }
 
-        const order = await tx.order.create({
+        return tx.order.create({
           data: {
             userId: user.id,
-            companyId: group.companyId,
             totalPrice: group.totalPrice,
             status: 'PENDING',
             notes: dto.notes,
             items: {
-              create: group.items.map((item) => ({
+              create: group.items.map((item: any) => ({
                 productId: item.productId,
                 size: item.size,
                 quantity: item.quantity,
@@ -186,156 +131,119 @@ export class OrderService {
             },
           },
           include: {
-            company: { select: { id: true, name: true } },
-            items: {
-              include: {
-                product: { select: { id: true, name: true, imageUrl: true } },
-              },
-            },
+            items: { include: { product: { select: { id: true, name: true, imageUrl: true } } } },
           },
         });
+      });
 
-        orders.push(order as OrderWithCompany);
-      }
+      createdOrders.push({ order, company: group.company });
+    }
 
-      return orders;
-    });
+    await this.registryPrisma.cartItem.deleteMany({ where: { cartId: cart.id } });
 
-    const grandTotal = createdOrders.reduce(
-      (sum, order) => sum + Number(order.totalPrice),
-      0,
-    );
+    const grandTotal = createdOrders.reduce((sum, o) => sum + Number(o.order.totalPrice), 0);
 
     return {
-      message: 'Checkout successful! Orders have been created.',
+      message: 'Checkout successful!',
       ordersCreated: createdOrders.length,
       grandTotal: parseFloat(grandTotal.toFixed(2)),
-      orders: createdOrders.map((o) => this.serializeOrder(o)),
+      orders: createdOrders.map((o) => this.serializeOrder(o.order, o.company)),
     };
   }
 
-  /**
-   * Seller: update order status (e.g., PENDING -> SHIPPED).
-   */
-  async updateOrderStatus(
-    id: string,
-    dto: UpdateOrderStatusDto,
-    user: AuthenticatedUser,
-  ) {
+  async updateOrderStatus(id: string, dto: UpdateOrderStatusDto, user: AuthenticatedUser) {
     const order = await this.prisma.order.findUnique({ where: { id } });
-    if (!order) {
-      throw new NotFoundException(`Order with id "${id}" not found`);
-    }
-
-    if (order.companyId !== user.companyId) {
-      throw new ForbiddenException(
-        'You can only update orders belonging to your company',
-      );
-    }
+    if (!order) throw new NotFoundException(`Order not found`);
 
     const updated = await this.prisma.order.update({
       where: { id },
       data: { status: dto.status },
       include: {
-        company: { select: { id: true, name: true } },
-        items: {
-          include: {
-            product: { select: { id: true, name: true, imageUrl: true } },
-          },
-        },
+        items: { include: { product: { select: { id: true, name: true, imageUrl: true } } } },
       },
     });
 
-    return this.serializeOrder(updated as OrderWithCompany);
+    const company = await this.registryPrisma.company.findUnique({ where: { id: user.companyId! } });
+    return this.serializeOrder(updated, company || undefined);
   }
 
   async getBuyerOrders(user: AuthenticatedUser) {
-    const orders = await this.prisma.order.findMany({
-      where: { userId: user.id },
-      include: {
-        company: { select: { id: true, name: true } },
-        items: {
-          include: {
-            product: { select: { id: true, name: true, imageUrl: true } },
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const companies = await this.registryPrisma.company.findMany({ where: { isActive: true } });
+    let allOrders: any[] = [];
 
-    return orders.map((o) => this.serializeOrder(o as OrderWithCompany));
+    for (const company of companies) {
+      const tenantPrisma = this.tenantManager.getTenantClient(company.id);
+      const orders = await tenantPrisma.order.findMany({
+        where: { userId: user.id },
+        include: {
+          items: { include: { product: { select: { id: true, name: true, imageUrl: true } } } },
+        },
+      });
+      allOrders = allOrders.concat(orders.map((o: any) => this.serializeOrder(o, company)));
+    }
+
+    return allOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   async getSellerOrders(user: AuthenticatedUser) {
-    if (!user.companyId) {
-      throw new BadRequestException('You are not associated with any company.');
-    }
-
     const orders = await this.prisma.order.findMany({
-      where: { companyId: user.companyId },
       include: {
-        user: { select: { id: true, name: true, email: true } },
-        items: {
-          include: {
-            product: { select: { id: true, name: true, imageUrl: true } },
-          },
-        },
+        items: { include: { product: { select: { id: true, name: true, imageUrl: true } } } },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    return orders.map((o) => this.serializeSellerOrder(o as OrderWithUser));
+    const results: any[] = [];
+    for (const order of orders) {
+        const buyer = await this.registryPrisma.user.findUnique({ where: { id: order.userId } });
+        results.push(this.serializeSellerOrder({ ...order, user: buyer }));
+    }
+    return results;
   }
 
   async getOrderById(orderId: string, user: AuthenticatedUser) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
-        company: { select: { id: true, name: true } },
-        user: { select: { id: true, name: true, email: true } },
-        items: {
-          include: {
-            product: { select: { id: true, name: true, imageUrl: true } },
-          },
-        },
+        items: { include: { product: { select: { id: true, name: true, imageUrl: true } } } },
       },
     });
 
-    if (!order) {
-      throw new NotFoundException(`Order with id "${orderId}" not found`);
+    if (order) {
+        const company = user.companyId ? await this.registryPrisma.company.findUnique({ where: { id: user.companyId } }) : null;
+        return this.serializeOrder(order, company || undefined);
     }
 
-    const isBuyer = order.userId === user.id;
-    const isSeller = order.companyId === user.companyId;
-
-    if (!isBuyer && !isSeller && user.role !== 'ADMIN') {
-      throw new NotFoundException(`Order with id "${orderId}" not found`);
+    const companies = await this.registryPrisma.company.findMany();
+    for (const comp of companies) {
+        const tenantPrisma = this.tenantManager.getTenantClient(comp.id);
+        const o = await tenantPrisma.order.findUnique({
+            where: { id: orderId },
+            include: {
+              items: { include: { product: { select: { id: true, name: true, imageUrl: true } } } },
+            },
+        });
+        if (o && (o.userId === user.id || user.role === 'ADMIN')) {
+            return this.serializeOrder(o, comp);
+        }
     }
 
-    return this.serializeOrder(order as OrderWithCompany);
+    throw new NotFoundException(`Order not found`);
   }
 
-  private groupItemsByCompany(items: CartItemWithProduct[]): CompanyOrderGroup[] {
-    const groupMap = new Map<string, CompanyOrderGroup>();
-
+  private groupItemsByCompany(items: any[]): any[] {
+    const groupMap = new Map<string, any>();
     for (const item of items) {
       const { companyId, company } = item.product;
       const itemTotal = Number(item.product.price) * item.quantity;
-
       if (groupMap.has(companyId)) {
         const group = groupMap.get(companyId)!;
         group.items.push(item);
         group.totalPrice = parseFloat((group.totalPrice + itemTotal).toFixed(2));
       } else {
-        groupMap.set(companyId, {
-          companyId,
-          company,
-          items: [item],
-          totalPrice: parseFloat(itemTotal.toFixed(2)),
-        });
+        groupMap.set(companyId, { companyId, company, items: [item], totalPrice: parseFloat(itemTotal.toFixed(2)) });
       }
     }
-
     return Array.from(groupMap.values());
   }
 }

@@ -1,5 +1,6 @@
 import {
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,20 +10,17 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductDto } from './dto/query-product.dto';
 import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { Prisma } from '@prisma/client';
-
-type ProductWithRelations = Prisma.ProductGetPayload<{
-  include: {
-    sizes: true;
-    category: { select: { id: true; name: true } };
-    company: { select: { id: true; name: true; logoUrl: true } };
-  };
-}>;
+import { TenantConnectionService } from '../tenant/tenant.module';
 
 @Injectable()
 export class ProductService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject('TENANT_PRISMA') private readonly prisma: any,
+    private readonly registryPrisma: PrismaService,
+    private readonly tenantManager: TenantConnectionService,
+  ) {}
 
-  private serializeProduct(product: ProductWithRelations) {
+  private serializeProduct(product: any, companyInfo?: any) {
     return {
       id: product.id,
       name: product.name,
@@ -30,15 +28,15 @@ export class ProductService {
       price: Number(product.price),
       images: product.imageUrl ? [product.imageUrl] : [],
       sizes: product.sizes
-        .sort((a, b) => a.size - b.size)
-        .map((s) => ({ size: String(s.size), stock: s.stock })),
-      sellerId: product.companyId,
-      sellerName: product.company.name,
-      sellerLogo: product.company.logoUrl,
-      category: product.category.name,
+        ? product.sizes.sort((a, b) => a.size - b.size).map((s: any) => ({ size: String(s.size), stock: s.stock }))
+        : [],
+      sellerId: companyInfo?.id || product.companyId,
+      sellerName: companyInfo?.name || "Official Store",
+      sellerLogo: companyInfo?.logoUrl || null,
+      category: product.category?.name || "Uncategorized",
       rating: 0,
       reviewCount: 0,
-      createdAt: product.createdAt.toISOString(),
+      createdAt: product.createdAt instanceof Date ? product.createdAt.toISOString() : product.createdAt,
     };
   }
 
@@ -48,11 +46,7 @@ export class ProductService {
     const category = await this.prisma.category.findUnique({
       where: { id: dto.categoryId },
     });
-    if (!category) {
-      throw new NotFoundException(
-        `Category with id "${dto.categoryId}" not found`,
-      );
-    }
+    if (!category) throw new NotFoundException(`Category not found`);
 
     const product = await this.prisma.product.create({
       data: {
@@ -62,79 +56,67 @@ export class ProductService {
         imageUrl: dto.imageUrl,
         categoryId: dto.categoryId,
         companyId,
-        sizes: {
-          create: dto.sizes.map((s) => ({ size: s.size, stock: s.stock })),
-        },
+        sizes: { create: dto.sizes.map((s) => ({ size: s.size, stock: s.stock })) },
       },
-      include: {
-        sizes: true,
-        category: { select: { id: true, name: true } },
-        company: { select: { id: true, name: true, logoUrl: true } },
-      },
+      include: { sizes: true, category: { select: { id: true, name: true } } },
     });
 
-    return this.serializeProduct(product);
+    const company = await this.registryPrisma.company.findUnique({ where: { id: companyId } });
+    return this.serializeProduct(product, company);
   }
 
   async findAllCategories() {
-    return this.prisma.category.findMany({
-      orderBy: { name: 'asc' },
-    });
+    return this.prisma.category.findMany({ orderBy: { name: 'asc' } });
   }
 
   async findAll(query: QueryProductDto) {
-    const where: Prisma.ProductWhereInput = { isActive: true };
+    if (query.companyId) {
+      const tenantPrisma = this.tenantManager.getTenantClient(query.companyId);
+      const company = await this.registryPrisma.company.findUnique({ where: { id: query.companyId } });
+      const where: any = { isActive: true };
+      if (query.categoryId) where.categoryId = query.categoryId;
+      if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
 
-    if (query.categoryId) where.categoryId = query.categoryId;
-    if (query.companyId) where.companyId = query.companyId;
-    if (query.search) {
-      where.name = { contains: query.search, mode: 'insensitive' };
+      const products = await tenantPrisma.product.findMany({
+        where,
+        include: { sizes: true, category: { select: { id: true, name: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      return products.map((p: any) => this.serializeProduct(p, company));
     }
 
-    const products = await this.prisma.product.findMany({
-      where,
-      include: {
-        sizes: true,
-        category: { select: { id: true, name: true } },
-        company: { select: { id: true, name: true, logoUrl: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const companies = await this.registryPrisma.company.findMany({ where: { isActive: true } });
+    let allProducts: any[] = [];
+    for (const company of companies) {
+      const tenantPrisma = this.tenantManager.getTenantClient(company.id);
+      const where: any = { isActive: true };
+      if (query.categoryId) where.categoryId = query.categoryId;
+      if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
 
-    return products.map((p) => this.serializeProduct(p));
+      const products = await tenantPrisma.product.findMany({
+        where,
+        include: { sizes: true, category: { select: { id: true, name: true } } },
+        take: 20,
+      });
+      allProducts = allProducts.concat(products.map((p: any) => this.serializeProduct(p, company)));
+    }
+    return allProducts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   async findOne(id: string) {
-    const product = await this.prisma.product.findUnique({
-      where: { id },
-      include: {
-        sizes: true,
-        category: { select: { id: true, name: true } },
-        company: { select: { id: true, name: true, logoUrl: true } },
-      },
-    });
-
-    if (!product || !product.isActive) {
-      throw new NotFoundException(`Product with id "${id}" not found`);
+    const companies = await this.registryPrisma.company.findMany();
+    for (const company of companies) {
+        const tenantPrisma = this.tenantManager.getTenantClient(company.id);
+        const product = await tenantPrisma.product.findUnique({
+            where: { id },
+            include: { sizes: true, category: { select: { id: true, name: true } } },
+        });
+        if (product && product.isActive) return this.serializeProduct(product, company);
     }
-
-    return this.serializeProduct(product);
+    throw new NotFoundException(`Product not found`);
   }
 
   async update(id: string, dto: UpdateProductDto, user: AuthenticatedUser) {
-    const existing = await this.prisma.product.findUnique({ where: { id } });
-    if (!existing || !existing.isActive) {
-      throw new NotFoundException(`Product with id "${id}" not found`);
-    }
-    this.assertOwnership(existing.companyId, user);
-
-    const sizesUpdate = dto.sizes
-      ? {
-          deleteMany: {},
-          create: dto.sizes.map((s) => ({ size: s.size, stock: s.stock })),
-        }
-      : undefined;
-
     const product = await this.prisma.product.update({
       where: { id },
       data: {
@@ -143,39 +125,15 @@ export class ProductService {
         ...(dto.price && { price: dto.price }),
         ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
         ...(dto.categoryId && { categoryId: dto.categoryId }),
-        ...(sizesUpdate && { sizes: sizesUpdate }),
       },
-      include: {
-        sizes: true,
-        category: { select: { id: true, name: true } },
-        company: { select: { id: true, name: true, logoUrl: true } },
-      },
+      include: { sizes: true, category: { select: { id: true, name: true } } },
     });
-
-    return this.serializeProduct(product);
+    const company = await this.registryPrisma.company.findUnique({ where: { id: user.companyId! } });
+    return this.serializeProduct(product, company);
   }
 
   async remove(id: string, user: AuthenticatedUser) {
-    const existing = await this.prisma.product.findUnique({ where: { id } });
-    if (!existing || !existing.isActive) {
-      throw new NotFoundException(`Product with id "${id}" not found`);
-    }
-    this.assertOwnership(existing.companyId, user);
-
-    await this.prisma.product.update({
-      where: { id },
-      data: { isActive: false },
-    });
-
-    return { message: `Product "${existing.name}" deleted successfully` };
-  }
-
-  private assertOwnership(productCompanyId: string, user: AuthenticatedUser) {
-    if (user.role === 'ADMIN') return;
-    if (productCompanyId !== user.companyId) {
-      throw new ForbiddenException(
-        'You can only manage products belonging to your company',
-      );
-    }
+    await this.prisma.product.update({ where: { id }, data: { isActive: false } });
+    return { message: `Deleted successfully` };
   }
 }
