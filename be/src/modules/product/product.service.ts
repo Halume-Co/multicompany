@@ -40,15 +40,16 @@ export class ProductService {
     };
   }
 
+  /**
+   * CREATE: Dual-Write Pattern (Option B)
+   * 1. Save to Tenant Silo (Source of Truth)
+   * 2. Save to Public Registry (Fast Search Index)
+   */
   async create(dto: CreateProductDto, user: AuthenticatedUser) {
     const companyId = user.companyId!;
 
-    const category = await this.prisma.category.findUnique({
-      where: { id: dto.categoryId },
-    });
-    if (!category) throw new NotFoundException(`Category not found`);
-
-    const product = await this.prisma.product.create({
+    // 1. Write to Tenant Silo
+    const productInSilo = await this.prisma.product.create({
       data: {
         name: dto.name,
         description: dto.description,
@@ -61,62 +62,94 @@ export class ProductService {
       include: { sizes: true, category: { select: { id: true, name: true } } },
     });
 
+    // 2. Write to Public Index (No stock/sizes here)
+    await this.registryPrisma.product.upsert({
+      where: { id: productInSilo.id },
+      update: {
+        name: dto.name,
+        price: dto.price,
+        imageUrl: dto.imageUrl,
+        categoryId: dto.categoryId,
+        companyId,
+      },
+      create: {
+        id: productInSilo.id,
+        name: dto.name,
+        description: dto.description,
+        price: dto.price,
+        imageUrl: dto.imageUrl,
+        categoryId: dto.categoryId,
+        companyId,
+      }
+    });
+
     const company = await this.registryPrisma.company.findUnique({ where: { id: companyId } });
-    return this.serializeProduct(product, company);
+    return this.serializeProduct(productInSilo, company);
   }
 
   async findAllCategories() {
-    return this.prisma.category.findMany({ orderBy: { name: 'asc' } });
+    // Categories are shared/cached in Registry for fast filtering
+    return this.registryPrisma.category.findMany({ orderBy: { name: 'asc' } });
   }
 
+  /**
+   * FIND ALL: Fast Search Pattern (Option B)
+   * Query the Public Registry database (The Index) instead of looping through all Silos.
+   */
   async findAll(query: QueryProductDto) {
-    if (query.companyId) {
-      const tenantPrisma = this.tenantManager.getTenantClient(query.companyId);
-      const company = await this.registryPrisma.company.findUnique({ where: { id: query.companyId } });
-      const where: any = { isActive: true };
-      if (query.categoryId) where.categoryId = query.categoryId;
-      if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
+    const where: Prisma.ProductWhereInput = { isActive: true };
+    if (query.categoryId) where.categoryId = query.categoryId;
+    if (query.companyId) where.companyId = query.companyId;
+    if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
 
-      const products = await tenantPrisma.product.findMany({
-        where,
-        include: { sizes: true, category: { select: { id: true, name: true } } },
-        orderBy: { createdAt: 'desc' },
-      });
-      return products.map((p: any) => this.serializeProduct(p, company));
+    // This is secepat kilat (Lightning Fast) because it's only 1 query to the public schema
+    const products = await this.registryPrisma.product.findMany({
+      where,
+      include: { 
+        category: { select: { id: true, name: true } },
+        // Note: In B approach, we don't fetch real-time sizes here for homepage
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    // For logos and company names, we aggregate from Company registry
+    const results: any[] = [];
+    for (const p of products) {
+        const company = await this.registryPrisma.company.findUnique({ 
+            where: { id: p.companyId },
+            select: { id: true, name: true, logoUrl: true }
+        });
+        results.push(this.serializeProduct(p, company));
     }
 
-    const companies = await this.registryPrisma.company.findMany({ where: { isActive: true } });
-    let allProducts: any[] = [];
-    for (const company of companies) {
-      const tenantPrisma = this.tenantManager.getTenantClient(company.id);
-      const where: any = { isActive: true };
-      if (query.categoryId) where.categoryId = query.categoryId;
-      if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
-
-      const products = await tenantPrisma.product.findMany({
-        where,
-        include: { sizes: true, category: { select: { id: true, name: true } } },
-        take: 20,
-      });
-      allProducts = allProducts.concat(products.map((p: any) => this.serializeProduct(p, company)));
-    }
-    return allProducts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return results;
   }
 
+  /**
+   * FIND ONE: Detailed Silo View
+   * When user clicks a product, we fetch the TRUTH (stock) from the Silo.
+   */
   async findOne(id: string) {
-    const companies = await this.registryPrisma.company.findMany();
-    for (const company of companies) {
-        const tenantPrisma = this.tenantManager.getTenantClient(company.id);
-        const product = await tenantPrisma.product.findUnique({
-            where: { id },
-            include: { sizes: true, category: { select: { id: true, name: true } } },
-        });
-        if (product && product.isActive) return this.serializeProduct(product, company);
-    }
-    throw new NotFoundException(`Product not found`);
+    // 1. Get registry info first to find out who owns this product
+    const registryProduct = await this.registryPrisma.product.findUnique({ where: { id } });
+    if (!registryProduct) throw new NotFoundException('Product not found');
+
+    // 2. Fetch the TRUTH from the owner's silo
+    const tenantPrisma = this.tenantManager.getTenantClient(registryProduct.companyId);
+    const product = await tenantPrisma.product.findUnique({
+        where: { id },
+        include: { sizes: true, category: { select: { id: true, name: true } } },
+    });
+
+    if (!product || !product.isActive) throw new NotFoundException(`Product not found`);
+
+    const company = await this.registryPrisma.company.findUnique({ where: { id: registryProduct.companyId } });
+    return this.serializeProduct(product, company);
   }
 
   async update(id: string, dto: UpdateProductDto, user: AuthenticatedUser) {
+    // 1. Update Silo (Truth)
     const product = await this.prisma.product.update({
       where: { id },
       data: {
@@ -128,12 +161,26 @@ export class ProductService {
       },
       include: { sizes: true, category: { select: { id: true, name: true } } },
     });
+
+    // 2. Sync to Public Index
+    await this.registryPrisma.product.update({
+        where: { id },
+        data: {
+            ...(dto.name && { name: dto.name }),
+            ...(dto.price && { price: dto.price }),
+            ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
+            ...(dto.categoryId && { categoryId: dto.categoryId }),
+        }
+    });
+
     const company = await this.registryPrisma.company.findUnique({ where: { id: user.companyId! } });
     return this.serializeProduct(product, company);
   }
 
   async remove(id: string, user: AuthenticatedUser) {
+    // Soft delete in both
     await this.prisma.product.update({ where: { id }, data: { isActive: false } });
+    await this.registryPrisma.product.update({ where: { id }, data: { isActive: false } });
     return { message: `Deleted successfully` };
   }
 }
