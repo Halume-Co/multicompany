@@ -86,7 +86,7 @@ export class OrderService {
         let productDetails: any = null;
         let companyInfo: any = null;
         for (const company of companies) {
-            const tenantPrisma = this.tenantManager.getTenantClient(company.id);
+            const tenantPrisma = await this.tenantManager.getTenantClient(company.id);
             const product = await tenantPrisma.product.findUnique({
                 where: { id: item.productId },
                 include: { sizes: true }
@@ -104,7 +104,7 @@ export class OrderService {
     const createdOrders: any[] = [];
 
     for (const group of groups) {
-      const tenantPrisma = this.tenantManager.getTenantClient(group.companyId);
+      const tenantPrisma = await this.tenantManager.getTenantClient(group.companyId);
 
       const order = await tenantPrisma.$transaction(async (tx: any) => {
         for (const item of group.items) {
@@ -172,7 +172,7 @@ export class OrderService {
     let allOrders: any[] = [];
 
     for (const company of companies) {
-      const tenantPrisma = this.tenantManager.getTenantClient(company.id);
+      const tenantPrisma = await this.tenantManager.getTenantClient(company.id);
       const orders = await tenantPrisma.order.findMany({
         where: { userId: user.id },
         include: {
@@ -216,7 +216,7 @@ export class OrderService {
 
     const companies = await this.registryPrisma.company.findMany();
     for (const comp of companies) {
-        const tenantPrisma = this.tenantManager.getTenantClient(comp.id);
+        const tenantPrisma = await this.tenantManager.getTenantClient(comp.id);
         const o = await tenantPrisma.order.findUnique({
             where: { id: orderId },
             include: {

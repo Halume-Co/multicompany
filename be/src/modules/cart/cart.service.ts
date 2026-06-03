@@ -56,7 +56,7 @@ export class CartService {
         let companyInfo: any = null;
 
         for (const company of companies) {
-            const tenantPrisma = this.tenantManager.getTenantClient(company.id);
+            const tenantPrisma = await this.tenantManager.getTenantClient(company.id);
             const product = await tenantPrisma.product.findUnique({
                 where: { id: item.productId },
                 include: { category: true, sizes: true }
@@ -94,7 +94,7 @@ export class CartService {
     let productDetails: any = null;
 
     for (const company of companies) {
-        const tenantPrisma = this.tenantManager.getTenantClient(company.id);
+        const tenantPrisma = await this.tenantManager.getTenantClient(company.id);
         const product = await tenantPrisma.product.findUnique({
             where: { id: dto.productId },
             include: { sizes: true }
