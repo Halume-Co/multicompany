@@ -32,6 +32,14 @@ async function createTenantSchema(companyId: string) {
 async function main() {
   console.log('🚀 Starting Federated Silo Seeding...');
 
+  // 0. Cleanup
+  console.log('🧹 Cleaning up old data...');
+  await prisma.cartItem.deleteMany();
+  await prisma.cart.deleteMany();
+  await prisma.session.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.company.deleteMany();
+
   // 1. Setup Main Companies (Registry)
   const companies = [
     { id: '11111111-1111-4111-8111-111111111111', name: 'Nike', email: 'seller@nike.example.com', logo: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=100&h=100&q=80' },

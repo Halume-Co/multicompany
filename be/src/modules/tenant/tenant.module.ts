@@ -8,12 +8,13 @@ export class TenantConnectionService {
   constructor(private readonly prisma: PrismaService) {}
 
   getTenantClient(companyId: string) {
+    const prisma = this.prisma;
     const schemaName = `tenant_${companyId.toString().replace(/-/g, '_')}`;
-    return this.prisma.$extends({
+    return prisma.$extends({
       query: {
         $allModels: {
           async $allOperations({ args, query }) {
-            await this.prisma.$executeRawUnsafe(`SET search_path TO "${schemaName}", public`);
+            await prisma.$executeRawUnsafe(`SET search_path TO "${schemaName}", public`);
             return query(args);
           },
         },
